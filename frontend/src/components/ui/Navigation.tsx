@@ -57,3 +57,21 @@ export function NavButton({
     </button>
   );
 }
+
+export interface NavProps {
+  ariaLabel?: string;
+  className?: string;
+  children: ReactNode;
+}
+
+export function Nav({
+  ariaLabel = "Main navigation",
+  className = "",
+  children,
+}: NavProps) {
+  return (
+    <nav aria-label={ariaLabel} className={className}>
+      {children}
+    </nav>
+  );
+}

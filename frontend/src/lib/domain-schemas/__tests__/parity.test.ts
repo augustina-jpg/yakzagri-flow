@@ -10,6 +10,8 @@
  * disagree about what a valid trade is.
  */
 import fc from "fast-check";
+import fs from "node:fs";
+import path from "node:path";
 import {
   createTradeInputSchema,
   DEFAULT_LOSS_BPS,
@@ -17,6 +19,7 @@ import {
   STELLAR_PUBLIC_KEY_REGEX,
   USDC_AMOUNT_REGEX,
 } from "../trade";
+import { eventSchemas, type EventName } from "../events";
 
 /** Independent restatement of the rules — intentionally NOT importing the schema logic. */
 function referenceAccepts(input: Record<string, unknown>): boolean {
@@ -122,4 +125,186 @@ describe("shared trade schema — client/server acceptance parity", () => {
       }).success,
     ).toBe(false);
   });
+});
+
+/* -------------------------------------------------------------------------- */
+/*  Soroban event schema parity                                               */
+/* -------------------------------------------------------------------------- */
+
+type JsonSchemaType = "string" | "integer" | "number" | "boolean" | "object" | "array";
+
+interface JsonSchemaField {
+  type: JsonSchemaType;
+  description?: string;
+  enum?: string[];
+}
+
+interface JsonEventDefinition {
+  name: string;
+  description?: string;
+  fields: Record<string, JsonSchemaField>;
+}
+
+interface JsonEventsFile {
+  contract?: string;
+  events: JsonEventDefinition[];
+}
+
+/** Locate the repo-root `schemas/events/amana_escrow.events.json` from this test file. */
+function loadEventsJson(): JsonEventsFile {
+  const candidates = [
+    path.resolve(__dirname, "../../../../../schemas/events/amana_escrow.events.json"),
+    path.resolve(process.cwd(), "schemas/events/amana_escrow.events.json"),
+    path.resolve(process.cwd(), "../schemas/events/amana_escrow.events.json"),
+  ];
+  const found = candidates.find((p) => fs.existsSync(p));
+  if (!found) {
+    throw new Error(
+      `Could not locate schemas/events/amana_escrow.events.json. Tried:\n${candidates.join("\n")}`,
+    );
+  }
+  return JSON.parse(fs.readFileSync(found, "utf8")) as JsonEventsFile;
+}
+
+const eventsJson = loadEventsJson();
+
+/** Map a JSON-schema primitive type to a representative JS value. */
+function sampleForType(field: JsonSchemaField): unknown {
+  if (field.enum && field.enum.length > 0) return field.enum[0];
+  switch (field.type) {
+    case "string":
+      return "G" + "A".repeat(55);
+    case "integer":
+      return 1;
+    case "number":
+      return 1.5;
+    case "boolean":
+      return true;
+    case "array":
+      return [];
+    case "object":
+      return {};
+    default:
+      return null;
+  }
+}
+
+/** Build a representative payload for an event from its JSON field list. */
+function samplePayload(event: JsonEventDefinition): Record<string, unknown> {
+  const payload: Record<string, unknown> = {};
+  for (const [key, field] of Object.entries(event.fields)) {
+    payload[key] = sampleForType(field);
+  }
+  return payload;
+}
+
+/** Assert a JS value matches the JSON-schema primitive type. */
+function matchesJsonType(value: unknown, type: JsonSchemaType): boolean {
+  switch (type) {
+    case "string":
+      return typeof value === "string";
+    case "integer":
+      return typeof value === "number" && Number.isInteger(value);
+    case "number":
+      return typeof value === "number" && Number.isFinite(value);
+    case "boolean":
+      return typeof value === "boolean";
+    case "array":
+      return Array.isArray(value);
+    case "object":
+      return typeof value === "object" && value !== null && !Array.isArray(value);
+    default:
+      return false;
+  }
+}
+
+describe("Soroban event schema — JSON ↔ Zod parity", () => {
+  it("the events JSON file declares at least one event", () => {
+    expect(Array.isArray(eventsJson.events)).toBe(true);
+    expect(eventsJson.events.length).toBeGreaterThan(0);
+  });
+
+  it("every JSON event has a matching frontend Zod schema", () => {
+    const jsonNames = eventsJson.events.map((e) => e.name).sort();
+    const zodNames = Object.keys(eventSchemas).sort();
+    expect(zodNames).toEqual(jsonNames);
+  });
+
+  it("every frontend Zod event schema has a matching JSON event", () => {
+    const jsonNames = new Set(eventsJson.events.map((e) => e.name));
+    for (const name of Object.keys(eventSchemas)) {
+      expect(jsonNames.has(name)).toBe(true);
+    }
+  });
+
+  it.each(eventsJson.events.map((e) => [e.name, e] as const))(
+    "event %s: field lists match between JSON and Zod",
+    (_name, event) => {
+      const zodSchema = eventSchemas[event.name as EventName];
+      expect(zodSchema).toBeDefined();
+
+      // Derive the Zod object's field keys via a strict parse of a full sample.
+      const sample = samplePayload(event);
+      const parsed = zodSchema.safeParse(sample);
+      expect(parsed.success).toBe(true);
+
+      const jsonKeys = Object.keys(event.fields).sort();
+      const zodKeys = Object.keys(sample).sort();
+      expect(zodKeys).toEqual(jsonKeys);
+    },
+  );
+
+  it.each(eventsJson.events.map((e) => [e.name, e] as const))(
+    "event %s: representative payload validates against JSON types and Zod",
+    (_name, event) => {
+      const payload = samplePayload(event);
+
+      // JSON-schema side: every field present and of the declared type.
+      for (const [key, field] of Object.entries(event.fields)) {
+        expect(payload).toHaveProperty(key);
+        expect(matchesJsonType(payload[key], field.type)).toBe(true);
+        if (field.enum) {
+          expect(field.enum).toContain(payload[key]);
+        }
+      }
+
+      // Zod side: the same payload must validate.
+      const zodSchema = eventSchemas[event.name as EventName];
+      expect(zodSchema.safeParse(payload).success).toBe(true);
+    },
+  );
+
+  it.each(eventsJson.events.map((e) => [e.name, e] as const))(
+    "event %s: Zod rejects payloads with missing or extra fields",
+    (_name, event) => {
+      const zodSchema = eventSchemas[event.name as EventName];
+      const payload = samplePayload(event);
+
+      // Missing field.
+      const firstKey = Object.keys(event.fields)[0];
+      if (firstKey !== undefined) {
+        const missing = { ...payload };
+        delete missing[firstKey];
+        expect(zodSchema.safeParse(missing).success).toBe(false);
+      }
+
+      // Extra field.
+      const extra = { ...payload, __unexpected: "x" };
+      expect(zodSchema.safeParse(extra).success).toBe(false);
+    },
+  );
+
+  it.each(eventsJson.events.map((e) => [e.name, e] as const))(
+    "event %s: Zod rejects payloads with wrong field types",
+    (_name, event) => {
+      const zodSchema = eventSchemas[event.name as EventName];
+      const payload = samplePayload(event);
+
+      for (const [key, field] of Object.entries(event.fields)) {
+        const wrongValue = field.type === "string" ? 12345 : "not-the-right-type";
+        const mutated = { ...payload, [key]: wrongValue };
+        expect(zodSchema.safeParse(mutated).success).toBe(false);
+      }
+    },
+  );
 });
