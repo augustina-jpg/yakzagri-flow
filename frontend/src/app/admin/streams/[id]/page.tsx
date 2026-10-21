@@ -20,6 +20,12 @@ import {
   getAssetInfo,
   stroopsToAmount,
 } from "@/lib/stellar/assets";
+import {
+  CLAWBACK_REASON_CODES,
+  CLAWBACK_REASON_LABELS,
+  validateClawbackRequest,
+  type ClawbackReasonCode,
+} from "@/lib/clawbackValidation";
 
 export default function AdminStreamManagementPage() {
   const params = useParams();
@@ -36,6 +42,11 @@ export default function AdminStreamManagementPage() {
 
   const [suspendReason, setSuspendReason] = useState("");
   const [resumeNote, setResumeNote] = useState("");
+
+  const [clawbackReasonCode, setClawbackReasonCode] = useState<ClawbackReasonCode | "">("");
+  const [clawbackAuditTicket, setClawbackAuditTicket] = useState("");
+  const [clawbackConfirmation, setClawbackConfirmation] = useState("");
+  const [clawbackValidationErrors, setClawbackValidationErrors] = useState<string[]>([]);
 
   // Get asset info from stream data
   const assetInfo = useMemo(() => {
@@ -83,6 +94,20 @@ export default function AdminStreamManagementPage() {
   const handlePreviewClawback = async () => {
     if (!token || !clawbackInput.stroops) return;
 
+    const validation = validateClawbackRequest({
+      resourceId: streamId,
+      reasonCode: clawbackReasonCode,
+      auditTicket: clawbackAuditTicket,
+      confirmationPhrase: clawbackConfirmation,
+    });
+
+    if (!validation.valid) {
+      setClawbackValidationErrors(validation.errors);
+      setActionStatus("Error: Clawback request failed validation");
+      return;
+    }
+
+    setClawbackValidationErrors([]);
     setActionLoading(true);
     setActionStatus(null);
 
@@ -328,6 +353,61 @@ export default function AdminStreamManagementPage() {
                   placeholder={translateCopy("ui.enter_amount_to_clawback_2e10f7d")}
                 />
                 
+                <div>
+                  <label htmlFor="clawbackReasonCode" className="block text-sm font-medium text-text-primary mb-2">
+                    Reason code
+                  </label>
+                  <select
+                    id="clawbackReasonCode"
+                    value={clawbackReasonCode}
+                    onChange={(e) => setClawbackReasonCode(e.target.value as ClawbackReasonCode | "")}
+                    className="w-full rounded-lg border border-border-default bg-bg-elevated px-4 py-2 text-sm text-text-primary focus:border-gold focus:outline-none"
+                  >
+                    <option value="">Select a reason code</option>
+                    {CLAWBACK_REASON_CODES.map((code) => (
+                      <option key={code} value={code}>
+                        {CLAWBACK_REASON_LABELS[code]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label htmlFor="clawbackAuditTicket" className="block text-sm font-medium text-text-primary mb-2">
+                    Audit ticket reference
+                  </label>
+                  <input
+                    id="clawbackAuditTicket"
+                    type="text"
+                    value={clawbackAuditTicket}
+                    onChange={(e) => setClawbackAuditTicket(e.target.value)}
+                    placeholder="e.g. SEC-1234"
+                    className="w-full rounded-lg border border-border-default bg-bg-elevated px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-gold focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="clawbackConfirmation" className="block text-sm font-medium text-text-primary mb-2">
+                    Type the stream ID to confirm
+                  </label>
+                  <input
+                    id="clawbackConfirmation"
+                    type="text"
+                    value={clawbackConfirmation}
+                    onChange={(e) => setClawbackConfirmation(e.target.value)}
+                    placeholder={streamId}
+                    className="w-full rounded-lg border border-border-default bg-bg-elevated px-4 py-2 text-sm text-text-primary placeholder:text-text-muted focus:border-gold focus:outline-none"
+                  />
+                </div>
+
+                {clawbackValidationErrors.length > 0 && (
+                  <ul className="list-disc space-y-1 rounded-lg border border-status-danger/20 bg-status-danger/10 px-6 py-3 text-sm text-status-danger">
+                    {clawbackValidationErrors.map((message) => (
+                      <li key={message}>{message}</li>
+                    ))}
+                  </ul>
+                )}
+
                 <button
                   onClick={() => void handlePreviewClawback()}
                   disabled={actionLoading || !clawbackInput.isValid}
