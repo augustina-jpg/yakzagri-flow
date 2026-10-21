@@ -1,6 +1,6 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { DriverManifestForm } from '../DriverManifestForm';
+import { DriverManifestForm, normalizeNigerianPhone, validatePlate } from '../DriverManifestForm';
 
 // Mock the FormField component
 jest.mock('../FormField', () => ({
@@ -275,5 +275,93 @@ describe('DriverManifestForm Component', () => {
 
         rerender(<DriverManifestForm {...defaultProps} isOpen={false} />);
         expect(document.body.style.overflow).toBe('unset');
+    });
+
+    describe('normalizeNigerianPhone', () => {
+        it.each([
+            ['070', '07031234567'],
+            ['080', '08031234567'],
+            ['081', '08131234567'],
+            ['090', '09031234567'],
+            ['091', '09131234567'],
+        ])('normalizes local %s prefix to E.164', (_prefix, local) => {
+            expect(normalizeNigerianPhone(local)).toBe(`+234${local.slice(1)}`);
+        });
+
+        it('normalizes local numbers with spaces and dashes', () => {
+            expect(normalizeNigerianPhone('0803 123 4567')).toBe('+2348031234567');
+            expect(normalizeNigerianPhone('0803-123-4567')).toBe('+2348031234567');
+        });
+
+        it('passes through already-E.164 numbers', () => {
+            expect(normalizeNigerianPhone('+2348031234567')).toBe('+2348031234567');
+            expect(normalizeNigerianPhone('+234 803 123 4567')).toBe('+2348031234567');
+        });
+
+        it('returns null for invalid numbers', () => {
+            expect(normalizeNigerianPhone('')).toBeNull();
+            expect(normalizeNigerianPhone('12345')).toBeNull();
+            expect(normalizeNigerianPhone('06031234567')).toBeNull();
+            expect(normalizeNigerianPhone('+15551234567')).toBeNull();
+        });
+    });
+
+    describe('validatePlate', () => {
+        it('accepts valid plate formats', () => {
+            expect(validatePlate('ABC 123')).toBeNull();
+            expect(validatePlate('GEG 1123 H')).toBeNull();
+            expect(validatePlate('ABC-123-XY')).toBeNull();
+        });
+
+        it('rejects empty or whitespace-only plates', () => {
+            expect(validatePlate('')).not.toBeNull();
+            expect(validatePlate('   ')).not.toBeNull();
+        });
+
+        it('rejects malformed plates', () => {
+            expect(validatePlate('A')).not.toBeNull();
+            expect(validatePlate('!!!')).not.toBeNull();
+        });
+    });
+
+    describe('phone normalization and validation in the form', () => {
+        it('normalizes a local phone number on submit', () => {
+            const onComplete = jest.fn();
+            const { container } = render(<DriverManifestForm {...defaultProps} onComplete={onComplete} />);
+
+            fireEvent.change(screen.getByPlaceholderText('e.g. Amina Khalid'), { target: { value: 'John Doe' } });
+            fireEvent.change(screen.getByPlaceholderText('e.g. +234 803 000 0000'), { target: { value: '08031234567' } });
+            fireEvent.change(screen.getByPlaceholderText('e.g. GEG 1123 H'), { target: { value: 'ABC 123' } });
+
+            fireEvent.submit(container.querySelector('form')!);
+
+            expect(onComplete).toHaveBeenCalledWith({
+                driverName: 'John Doe',
+                driverPhone: '+2348031234567',
+                licensePlate: 'ABC 123',
+            });
+        });
+
+        it('shows an inline error for an invalid phone number and keeps submit disabled', () => {
+            render(<DriverManifestForm {...defaultProps} />);
+
+            fireEvent.change(screen.getByPlaceholderText('e.g. Amina Khalid'), { target: { value: 'John Doe' } });
+            fireEvent.change(screen.getByPlaceholderText('e.g. +234 803 000 0000'), { target: { value: '12345' } });
+            fireEvent.change(screen.getByPlaceholderText('e.g. GEG 1123 H'), { target: { value: 'ABC 123' } });
+
+            expect(screen.getByTestId('error-driverPhone')).toBeInTheDocument();
+            expect(screen.getByText('Submit Manifest')).toBeDisabled();
+        });
+
+        it('shows an inline error for an empty license plate', () => {
+            render(<DriverManifestForm {...defaultProps} />);
+
+            fireEvent.change(screen.getByPlaceholderText('e.g. Amina Khalid'), { target: { value: 'John Doe' } });
+            fireEvent.change(screen.getByPlaceholderText('e.g. +234 803 000 0000'), { target: { value: '+2348030000000' } });
+            fireEvent.change(screen.getByPlaceholderText('e.g. GEG 1123 H'), { target: { value: '   ' } });
+
+            expect(screen.getByTestId('error-licensePlate')).toBeInTheDocument();
+            expect(screen.getByText('Submit Manifest')).toBeDisabled();
+        });
     });
 });

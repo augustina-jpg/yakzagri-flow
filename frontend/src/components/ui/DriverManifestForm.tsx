@@ -14,6 +14,58 @@ export interface DriverManifestData {
   licensePlate: string;
 }
 
+const NIGERIAN_E164_PATTERN = /^\+234\d{10}$/;
+const PLATE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 -]{1,12}[A-Za-z0-9]$/;
+
+/**
+ * Normalize a Nigerian phone number to E.164 format (`+234XXXXXXXXXX`).
+ * Returns null when the input cannot be resolved to a valid number.
+ */
+export function normalizeNigerianPhone(raw: string): string | null {
+  if (typeof raw !== "string") {
+    return null;
+  }
+
+  const cleaned = raw.replace(/[\s\-().]/g, "");
+  if (cleaned === "") {
+    return null;
+  }
+
+  let digits: string;
+
+  if (cleaned.startsWith("+234")) {
+    digits = cleaned.slice(4);
+  } else if (cleaned.startsWith("234")) {
+    digits = cleaned.slice(3);
+  } else if (cleaned.startsWith("0")) {
+    digits = cleaned.slice(1);
+  } else {
+    return null;
+  }
+
+  if (!/^\d{10}$/.test(digits)) {
+    return null;
+  }
+
+  const normalized = `+234${digits}`;
+  return NIGERIAN_E164_PATTERN.test(normalized) ? normalized : null;
+}
+
+/**
+ * Validate a vehicle registration plate.
+ * Returns an error message when invalid, or null when valid.
+ */
+export function validatePlate(raw: string): string | null {
+  const trimmed = typeof raw === "string" ? raw.trim() : "";
+  if (trimmed === "") {
+    return "License plate is required";
+  }
+  if (!PLATE_PATTERN.test(trimmed)) {
+    return "Enter a valid license plate (2-14 letters, numbers, spaces or dashes)";
+  }
+  return null;
+}
+
 interface DriverManifestFormProps {
   isOpen: boolean;
   onComplete: (data: DriverManifestData) => void;
@@ -25,7 +77,28 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
   const [licensePlate, setLicensePlate] = useState("");
-  const submitEnabled = driverName.trim() !== '' && driverPhone.trim() !== '' && licensePlate.trim() !== '';
+  const [phoneTouched, setPhoneTouched] = useState(false);
+  const [plateTouched, setPlateTouched] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+
+  const phoneError = useMemo(() => {
+    if (driverPhone.trim() === "") {
+      return "Driver phone is required";
+    }
+    return normalizeNigerianPhone(driverPhone) === null
+      ? "Enter a valid Nigerian phone number (e.g. 0803 000 0000)"
+      : null;
+  }, [driverPhone]);
+
+  const plateError = useMemo(() => validatePlate(licensePlate), [licensePlate]);
+
+  const showPhoneError = (phoneTouched || submitAttempted) && phoneError !== null;
+  const showPlateError = (plateTouched || submitAttempted) && plateError !== null;
+
+  const submitEnabled =
+    driverName.trim() !== '' &&
+    phoneError === null &&
+    plateError === null;
 
   useEffect(() => {
     const bodyOverflow = document.body.style.overflow;
@@ -40,23 +113,42 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
   }, [isOpen]);
 
 
+  const handlePhoneBlur = () => {
+    setPhoneTouched(true);
+    const normalized = normalizeNigerianPhone(driverPhone);
+    if (normalized !== null) {
+      setDriverPhone(normalized);
+    }
+  };
+
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setSubmitAttempted(true);
     const form = formRef.current;
 
     if (!form) {
       return;
     }
 
+    const normalizedPhone = normalizeNigerianPhone(driverPhone);
+    const plateValidationError = validatePlate(licensePlate);
+
+    if (normalizedPhone === null || plateValidationError !== null) {
+      return;
+    }
+
     onComplete({
       driverName: driverName.trim(),
-      driverPhone: driverPhone.trim(),
+      driverPhone: normalizedPhone,
       licensePlate: licensePlate.trim(),
     });
 
     setDriverName("");
     setDriverPhone("");
     setLicensePlate("");
+    setPhoneTouched(false);
+    setPlateTouched(false);
+    setSubmitAttempted(false);
 
     onDismiss?.();
   };
@@ -102,7 +194,8 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
               <FormField
                 label="Driver Phone"
                 name="driver-phone"
-                hint="Include country code for best routing"
+                hint="Local numbers (0803...) are converted to +234 automatically"
+                error={showPhoneError ? phoneError ?? undefined : undefined}
                 required
               >
                 <input
@@ -111,20 +204,28 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
                   className="w-full rounded-xl border border-border-default bg-bg-input px-4 py-2 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/30"
                   value={driverPhone}
                   onChange={(event) => setDriverPhone(event.target.value)}
+                  onBlur={handlePhoneBlur}
                   placeholder={translateCopy("ui.e_g_234_803_000_0000_a54ac33")}
-                  pattern="^\\+?[0-9\s-]{7,20}$"
+                  aria-invalid={showPhoneError}
                   required
                 />
               </FormField>
 
-              <FormField label="License Plate" name="license-plate" required>
+              <FormField
+                label="License Plate"
+                name="license-plate"
+                error={showPlateError ? plateError ?? undefined : undefined}
+                required
+              >
                 <input
                   type="text"
                   name="license-plate"
                   className="w-full rounded-xl border border-border-default bg-bg-input px-4 py-2 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/30"
                   value={licensePlate}
                   onChange={(event) => setLicensePlate(event.target.value)}
+                  onBlur={() => setPlateTouched(true)}
                   placeholder={translateCopy("ui.e_g_geg_1123_h_814141c")}
+                  aria-invalid={showPlateError}
                   required
                 />
               </FormField>

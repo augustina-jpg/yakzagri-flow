@@ -70,3 +70,46 @@ export function appUrlForPath(pathname: string): string | null {
 export function screenForPath(pathname: string): DeepLinkScreen | null {
   return ROUTES.find((r) => r.match.test(pathname))?.screen ?? null;
 }
+
+/**
+ * Ordered IPFS gateway base URLs used to resolve `ipfs://` / CID evidence links.
+ *
+ * The first entry can be overridden via `NEXT_PUBLIC_IPFS_GATEWAY`; the rest are
+ * public fallbacks tried in order when the primary gateway is slow or rate-limited.
+ */
+export const IPFS_GATEWAYS: string[] = [
+  process.env.NEXT_PUBLIC_IPFS_GATEWAY?.trim() || "https://gateway.pinata.cloud/ipfs/",
+  "https://ipfs.io/ipfs/",
+].map((g) => (g.endsWith("/") ? g : `${g}/`));
+
+const CID_V0 = /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/;
+const CID_V1 = /^b[a-z2-7]{58,}$/i;
+
+/** Extract a bare IPFS CID from an `ipfs://` URL, gateway URL or raw CID string. */
+export function extractIpfsCid(value: string): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.startsWith("ipfs://")) {
+    const rest = trimmed.slice("ipfs://".length).replace(/^ipfs\//, "");
+    const cid = rest.split(/[/?#]/)[0];
+    return cid || null;
+  }
+
+  if (CID_V0.test(trimmed) || CID_V1.test(trimmed)) return trimmed;
+
+  // Gateway URL: .../ipfs/<cid>[/...]
+  const m = trimmed.match(/\/ipfs\/([^/?#]+)/);
+  if (m) return m[1] || null;
+
+  return null;
+}
+
+/** Build a gateway URL for `cid` using the gateway at `gatewayIndex` (null if out of range). */
+export function buildIpfsGatewayUrl(cid: string, gatewayIndex = 0): string | null {
+  if (!cid) return null;
+  const gateway = IPFS_GATEWAYS[gatewayIndex];
+  if (!gateway) return null;
+  return `${gateway}${encodeURIComponent(cid)}`;
+}

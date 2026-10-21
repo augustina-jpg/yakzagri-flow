@@ -113,4 +113,101 @@ describe("MediatorDisputesPage", () => {
     });
     expect(screen.getByRole("tab", { name: "Open" })).toBeInTheDocument();
   });
+
+  it("default-sorts the queue by oldest open dispute first", async () => {
+    const now = Date.now();
+    mockList.mockResolvedValue({
+      items: [
+        makeDispute({
+          id: "dispute-newer",
+          tradeId: "trade-newer",
+          createdAt: new Date(now - 60 * 60 * 1000).toISOString(),
+        }),
+        makeDispute({
+          id: "dispute-older",
+          tradeId: "trade-older",
+          createdAt: new Date(now - 48 * 60 * 60 * 1000).toISOString(),
+        }),
+      ],
+      pagination: { totalPages: 1 },
+    });
+
+    render(<MediatorDisputesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Trade trade-older/)).toBeInTheDocument();
+    });
+
+    const tradeLabels = screen
+      .getAllByText(/Trade trade-/)
+      .map((node) => node.textContent ?? "");
+    expect(tradeLabels[0]).toContain("trade-older");
+    expect(tradeLabels[1]).toContain("trade-newer");
+  });
+
+  it("renders a Critical SLA badge for disputes open longer than 24h", async () => {
+    mockList.mockResolvedValue({
+      items: [
+        makeDispute({
+          id: "dispute-critical",
+          tradeId: "trade-critical",
+          createdAt: new Date(Date.now() - 30 * 60 * 60 * 1000).toISOString(),
+        }),
+      ],
+      pagination: { totalPages: 1 },
+    });
+
+    render(<MediatorDisputesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Trade trade-critical/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Critical SLA/i)).toBeInTheDocument();
+  });
+
+  it("reorders the queue when the sort selector changes to trade value", async () => {
+    const now = Date.now();
+    mockList.mockResolvedValue({
+      items: [
+        makeDispute({
+          id: "dispute-older-low-value",
+          tradeId: "trade-older-low-value",
+          createdAt: new Date(now - 48 * 60 * 60 * 1000).toISOString(),
+          trade: {
+            buyerAddress: "GBUYER1234567890",
+            sellerAddress: "GSELLER1234567890",
+            amountUsdc: "100",
+          },
+        }),
+        makeDispute({
+          id: "dispute-newer-high-value",
+          tradeId: "trade-newer-high-value",
+          createdAt: new Date(now - 60 * 60 * 1000).toISOString(),
+          trade: {
+            buyerAddress: "GBUYER1234567890",
+            sellerAddress: "GSELLER1234567890",
+            amountUsdc: "5000",
+          },
+        }),
+      ],
+      pagination: { totalPages: 1 },
+    });
+
+    render(<MediatorDisputesPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Trade trade-older-low-value/)).toBeInTheDocument();
+    });
+
+    const sortSelect = screen.getByLabelText(/sort/i);
+    await userEvent.selectOptions(sortSelect, "tradeValue");
+
+    await waitFor(() => {
+      const tradeLabels = screen
+        .getAllByText(/Trade trade-/)
+        .map((node) => node.textContent ?? "");
+      expect(tradeLabels[0]).toContain("trade-newer-high-value");
+      expect(tradeLabels[1]).toContain("trade-older-low-value");
+    });
+  });
 });
