@@ -24,7 +24,9 @@ import {
   ModalBody,
   ModalFooter,
 } from "@/components/ui/Modal";
+import { ConfirmActionModal } from "@/components/ui/ConfirmActionModal";
 import { StatusBadge } from "@/components/ui/StatusBadge";
+import { useToast } from "@/components/ui/Toast";
 
 function formatDate(dateString: string) {
   return formatDateTime(dateString);
@@ -56,6 +58,12 @@ function InfoCard({
 type UserRole = "buyer" | "seller" | "mediator" | "observer";
 type DisputeCategory = "quality" | "delivery" | "payment" | "fraud" | "other";
 
+const CANCELLABLE_STATUSES = ["PENDING", "FUNDED"];
+
+function isCancellableStatus(status: string) {
+  return CANCELLABLE_STATUSES.includes(status.toUpperCase());
+}
+
 function deriveRole(
   walletAddress: string | null,
   buyerAddress: string,
@@ -82,10 +90,12 @@ export default function TradeDetailPage() {
   const { token, address, isAuthenticated } = useAuth();
   const { trade, loading, error, refetch } = useTradeDetail(tradeId);
   const { balance, asset } = useWallet();
+  const { toast } = useToast();
 
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [disputeReason, setDisputeReason] = useState("");
   const [disputeCategory, setDisputeCategory] = useState<DisputeCategory>("delivery");
@@ -185,6 +195,36 @@ export default function TradeDetailPage() {
     void runAction("Release Funds", "release-funds", (options) =>
       api.trades.releaseFunds(token!, tradeId, options),
     );
+  }
+
+  async function handleCancelTrade() {
+    if (!token || actionLoading) return;
+
+    setActionLoading(true);
+    setActionError(null);
+    setActionSuccess(null);
+
+    try {
+      await api.trades.cancelTrade(token, tradeId);
+      setCancelOpen(false);
+      setActionSuccess("Trade cancelled. Escrow funds will be returned to the buyer.");
+      toast({
+        title: "Trade cancelled",
+        description: "Escrow funds will be returned to the buyer.",
+        variant: "success",
+      });
+      void refetch();
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Cancel Trade failed";
+      setActionError(message);
+    } finally {
+      setActionLoading(false);
+    }
   }
 
   function handleInitiateDispute() {
@@ -349,6 +389,17 @@ export default function TradeDetailPage() {
                   </button>
                 )}
 
+                {(role === "buyer" || role === "seller") && isCancellableStatus(status) && (
+                  <button
+                    onClick={() => setCancelOpen(true)}
+                    disabled={actionLoading}
+                    data-testid="action-cancel-trade"
+                    className="rounded-lg border border-border-default px-4 py-2 text-sm font-semibold text-text-secondary transition-colors hover:border-border-hover hover:text-text-primary disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    Cancel Trade
+                  </button>
+                )}
+
                 {(role === "buyer" || role === "seller") && status === "FUNDED" && (
                   <button
                     onClick={() => {
@@ -394,6 +445,18 @@ export default function TradeDetailPage() {
           <p className="text-text-muted">{translateCopy("ui.trade_not_found_d9178ec")}</p>
         </div>
       )}
+
+      <ConfirmActionModal
+        open={cancelOpen}
+        onOpenChange={setCancelOpen}
+        variant="danger"
+        title="Cancel Trade"
+        message="This will cancel the trade and return the locked escrow funds to the buyer. Network fees apply for the on-chain cancellation transaction."
+        confirmLabel="Cancel Trade"
+        cancelLabel={translateCopy("common.cancel")}
+        loading={actionLoading}
+        onConfirm={() => void handleCancelTrade()}
+      />
 
       <Modal open={disputeOpen} onOpenChange={setDisputeOpen}>
         <ModalContent mobileFullScreen={false}>
