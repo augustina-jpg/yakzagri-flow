@@ -14,9 +14,28 @@ import { SkeletonList } from "@/components/ui/SkeletonList";
 import { Button } from "@/components/ui/Button";
 import { StreamClawbackForm } from "@/components/admin/StreamClawbackForm";
 import { VirtualizedList } from "@/components/ui/VirtualizedList";
+import {
+  computeStreamHealth,
+  formatEstimatedDepletion,
+  type StreamHealthStatus,
+} from "@/lib/api/adminStreams";
 
 const PAGE_SIZE = 20;
-const STREAM_ROW_HEIGHT = 140;
+const STREAM_ROW_HEIGHT = 200;
+
+const HEALTH_BADGE_STYLES: Record<StreamHealthStatus, string> = {
+  streaming: "bg-status-success/10 text-status-success border-status-success/30",
+  near_depletion: "bg-status-warning/10 text-status-warning border-status-warning/30",
+  completed: "bg-bg-subtle text-text-secondary border-border-default",
+  paused: "bg-status-info/10 text-status-info border-status-info/30",
+};
+
+const HEALTH_BADGE_LABELS: Record<StreamHealthStatus, string> = {
+  streaming: "Streaming",
+  near_depletion: "Near Depletion <10%",
+  completed: "Completed",
+  paused: "Paused",
+};
 
 export default function AdminStreamsPage() {
   const { token, isAuthenticated } = useAuth();
@@ -126,11 +145,16 @@ export default function AdminStreamsPage() {
         renderItem={(stream) => {
           const isActionable = BigInt(stream.unclaimed || "0") > BigInt(0);
           const isOpen = activeStreamId === stream.streamId;
+          const health = computeStreamHealth(stream);
+          const isNearDepletion = health.status === "near_depletion";
 
           return (
             <div
-              className="p-6 bg-bg-elevated rounded-lg border border-border-default mb-4"
+              className={`p-6 bg-bg-elevated rounded-lg border mb-4 ${
+                isNearDepletion ? "border-status-warning" : "border-border-default"
+              }`}
               data-testid={`stream-row-${stream.streamId}`}
+              data-health-status={health.status}
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
@@ -138,6 +162,12 @@ export default function AdminStreamsPage() {
                     <span className="font-mono text-sm text-text-primary">{stream.streamId}</span>
                     <span className="text-xs uppercase tracking-wide text-text-secondary">
                       {stream.status}
+                    </span>
+                    <span
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full border ${HEALTH_BADGE_STYLES[health.status]}`}
+                      data-testid={`stream-health-badge-${stream.streamId}`}
+                    >
+                      {HEALTH_BADGE_LABELS[health.status]}
                     </span>
                   </div>
                   <div className="text-sm text-text-secondary mb-1">
@@ -147,6 +177,29 @@ export default function AdminStreamsPage() {
                     {translateCopy("ui.remaining_vested_34f9f34")}{" "}<span className="font-mono text-text-primary">{stream.unclaimed}</span>
                     {" · "}
                     {translateCopy("ui.vesting_state_233c2e2")}{" "}{stream.vestingState}
+                  </div>
+                  <div className="mt-3" data-testid={`stream-progress-${stream.streamId}`}>
+                    <div className="flex items-center justify-between text-xs text-text-secondary mb-1">
+                      <span>{health.percentStreamed.toFixed(1)}% streamed</span>
+                      <span>{health.percentRemaining.toFixed(1)}% remaining</span>
+                    </div>
+                    <div
+                      className="h-2 w-full rounded-full bg-bg-subtle overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={Math.round(health.percentStreamed)}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    >
+                      <div
+                        className={`h-full rounded-full ${
+                          isNearDepletion ? "bg-status-warning" : "bg-status-success"
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(0, health.percentStreamed))}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 text-xs text-text-secondary">
+                      {formatEstimatedDepletion(health.estimatedDepletion)}
+                    </div>
                   </div>
                 </div>
                 <div>

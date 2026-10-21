@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useParams } from "next/navigation";
 import StreamDetailPage from "../[id]/page";
 import StreamsPage from "../page";
@@ -240,6 +240,39 @@ describe("StreamDetailPage", () => {
     });
   });
 
+  describe("Unauthenticated State", () => {
+    it("shows the authentication prompt instead of an endless loading spinner", async () => {
+      mockUseAuth.mockReturnValue({
+        token: null,
+        isAuthenticated: false,
+        isLoading: false,
+        address: null,
+        shortAddress: null,
+        isWalletConnected: false,
+        isWalletDetected: true,
+        error: null,
+        connectWallet: jest.fn(),
+        authenticate: jest.fn(),
+        logout: jest.fn(),
+        refreshAuth: jest.fn(),
+      });
+
+      mockUseAdmin.mockReturnValue({
+        isAdmin: false,
+        isAdminUIEnabled: true,
+        canAccessAdmin: false,
+        adminAddresses: ["GADMIN123"],
+      });
+
+      render(<StreamDetailPage />);
+
+      expect(await screen.findByText("Authentication Required")).toBeInTheDocument();
+      expect(screen.queryByText("Loading stream...")).not.toBeInTheDocument();
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+      expect(api.streams.getRemaining).not.toHaveBeenCalled();
+    });
+  });
+
   describe("Stream Data Display", () => {
     beforeEach(() => {
       mockUseAuth.mockReturnValue({
@@ -285,6 +318,57 @@ describe("StreamDetailPage", () => {
       });
 
       expect(screen.getByText("Stream not found")).toBeInTheDocument();
+    });
+
+    it("renders a progress bar reflecting claimed/totalVested", async () => {
+      (api.streams.getRemaining as jest.Mock).mockResolvedValue(mockStreamData);
+
+      render(<StreamDetailPage />);
+
+      const progressBar = await screen.findByRole("progressbar");
+      // 250000 claimed / 1000000 totalVested = 25%
+      expect(progressBar).toHaveAttribute("aria-valuenow", "25");
+      expect(progressBar).toHaveAttribute("aria-valuemin", "0");
+      expect(progressBar).toHaveAttribute("aria-valuemax", "100");
+    });
+
+    it("renders the StalenessIndicator with the last-fetched timestamp", async () => {
+      (api.streams.getRemaining as jest.Mock).mockResolvedValue(mockStreamData);
+
+      render(<StreamDetailPage />);
+
+      await screen.findByText("0.1");
+
+      expect(screen.getByTestId("staleness-indicator")).toBeInTheDocument();
+      expect(screen.getByText(/last (fetched|updated)/i)).toBeInTheDocument();
+    });
+
+    it("refetches the balance and updates displayed data when Refresh Balance is clicked", async () => {
+      (api.streams.getRemaining as jest.Mock).mockResolvedValue(mockStreamData);
+
+      render(<StreamDetailPage />);
+
+      await screen.findByText("0.1");
+      expect(api.streams.getRemaining).toHaveBeenCalledTimes(1);
+
+      (api.streams.getRemaining as jest.Mock).mockResolvedValue({
+        ...mockStreamData,
+        claimed: "500000",
+        unclaimed: "500000",
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /refresh balance/i }));
+
+      await waitFor(() => {
+        expect(api.streams.getRemaining).toHaveBeenCalledTimes(2);
+      });
+
+      expect(await screen.findByText("0.05")).toBeInTheDocument();
+      expect(screen.getAllByText("0.05").length).toBeGreaterThanOrEqual(2);
+
+      await waitFor(() => {
+        expect(screen.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "50");
+      });
     });
   });
 
