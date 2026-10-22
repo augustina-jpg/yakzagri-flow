@@ -66,13 +66,13 @@ describe('BentoCard Component', () => {
         const { container } = render(<BentoCard {...defaultProps} />);
         const card = container.firstChild as HTMLElement;
         expect(card).toHaveClass(
-            'bg-[#101E18F2]',
+            'bg-surface-1',
             'border',
             'border-border-default',
             'rounded-2xl',
             'p-6',
-            'shadow-card',
-            'hover:shadow-card-hover',
+            'shadow-elev-1',
+            'hover:shadow-elev-2',
             'transition-shadow',
             'duration-300',
             'relative',
@@ -151,7 +151,7 @@ describe('BentoCard Component', () => {
         );
         const header = container.querySelector('.flex.items-center.gap-2.mb-4');
         const icon = header?.querySelector('[data-testid="test-icon"]');
-        const title = header?.querySelector('h3');
+        const title = header?.querySelector('h2');
         expect(icon).toBeInTheDocument();
         expect(title).toBeInTheDocument();
     });

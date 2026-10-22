@@ -24,14 +24,12 @@ export function BentoCard({
   return (
     <div
       className={[
-        "bg-[#101E18F2]",
-        "dark:bg-surface-1",
+        "bg-surface-1",
         "border border-border-default",
-        "dark:border-border-default",
         "rounded-2xl",
         "p-6",
-        "shadow-card",
-        "hover:shadow-card-hover",
+        "shadow-elev-1",
+        "hover:shadow-elev-2",
         "transition-shadow duration-300",
         "relative",
         "overflow-hidden",
@@ -44,8 +42,8 @@ export function BentoCard({
       {...props}
     >
       <div className="flex items-center gap-2 mb-4">
-        {icon && <span className="text-gold dark:text-gold">{icon}</span>}
-        <h2 className="text-lg font-semibold text-text-primary dark:text-text-primary">
+        {icon && <span className="text-gold">{icon}</span>}
+        <h2 className="text-lg font-semibold text-text-primary">
           {title}
         </h2>
       </div>
