@@ -36,6 +36,57 @@ const mockXhr: Record<string, unknown> = {
 
 global.XMLHttpRequest = jest.fn(() => mockXhr) as unknown as typeof XMLHttpRequest;
 
+// Deterministic SHA-256 digest bytes (32 bytes) used by the mocked crypto.subtle.digest
+const MOCK_DIGEST_BYTES = new Uint8Array(32).fill(0xab);
+const MOCK_DIGEST_HEX = Array.from(MOCK_DIGEST_BYTES)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+
+// Mock crypto.subtle.digest
+const mockDigest = jest.fn(async () => MOCK_DIGEST_BYTES.buffer);
+Object.defineProperty(global, 'crypto', {
+    value: { subtle: { digest: mockDigest } },
+    configurable: true,
+});
+
+// Mock offscreen <video> metadata loading
+const mockVideoMetadata = { duration: 30, videoWidth: 1920, videoHeight: 1080 };
+let mockVideoShouldError = false;
+
+const originalCreateElement = document.createElement.bind(document);
+jest.spyOn(document, 'createElement').mockImplementation(((tagName: string, options?: ElementCreationOptions) => {
+    const element = originalCreateElement(tagName, options);
+    if (tagName.toLowerCase() === 'video') {
+        const video = element as HTMLVideoElement;
+        Object.defineProperty(video, 'duration', {
+            configurable: true,
+            get: () => mockVideoMetadata.duration,
+        });
+        Object.defineProperty(video, 'videoWidth', {
+            configurable: true,
+            get: () => mockVideoMetadata.videoWidth,
+        });
+        Object.defineProperty(video, 'videoHeight', {
+            configurable: true,
+            get: () => mockVideoMetadata.videoHeight,
+        });
+        Object.defineProperty(video, 'src', {
+            configurable: true,
+            set: () => {
+                setTimeout(() => {
+                    if (mockVideoShouldError) {
+                        video.dispatchEvent(new Event('error'));
+                    } else {
+                        video.dispatchEvent(new Event('loadedmetadata'));
+                    }
+                }, 0);
+            },
+        });
+        video.load = jest.fn();
+    }
+    return element;
+}) as typeof document.createElement);
+
 async function triggerXhrHandler(name: "onload" | "onerror") {
     await waitFor(() => expect(mockXhr[name]).toEqual(expect.any(Function)));
     (mockXhr[name] as () => void)();
@@ -61,6 +112,11 @@ describe('VideoUploadCard Component', () => {
         mockXhr.onerror = null;
         mockXhr.status = 200;
         mockXhr.responseText = JSON.stringify({ IpfsHash: 'QmTest123' });
+        mockDigest.mockClear();
+        mockVideoMetadata.duration = 30;
+        mockVideoMetadata.videoWidth = 1920;
+        mockVideoMetadata.videoHeight = 1080;
+        mockVideoShouldError = false;
     });
 
     it('renders without crashing with all props', () => {
@@ -331,5 +387,189 @@ describe('VideoUploadCard Component', () => {
         const { container } = render(<VideoUploadCard {...defaultProps} />);
         const card = container.querySelector('[data-testid="bento-card"]');
         expect(card).toHaveClass('h-full');
+    });
+
+    it('computes and displays the SHA-256 checksum of the selected video', async () => {
+        render(<VideoUploadCard {...defaultProps} />);
+
+        const file = new File(['test'], 'test.mp4', { type: 'video/mp4' });
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+        Object.defineProperty(fileInput, 'files', {
+            value: [file],
+        });
+
+        fireEvent.change(fileInput);
+
+        await waitFor(() => {
+            expect(mockDigest).toHaveBeenCalledWith('SHA-256', expect.anything());
+            expect(screen.getByText(MOCK_DIGEST_HEX)).toBeInTheDocument();
+        });
+    });
+
+    it('copies the SHA-256 checksum to the clipboard', async () => {
+        const writeText = jest.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', {
+            value: { writeText },
+            configurable: true,
+        });
+
+        render(<VideoUploadCard {...defaultProps} />);
+
+        const file = new File(['test'], 'test.mp4', { type: 'video/mp4' });
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+        Object.defineProperty(fileInput, 'files', {
+            value: [file],
+        });
+
+        fireEvent.change(fileInput);
+
+        await waitFor(() => {
+            expect(screen.getByText(MOCK_DIGEST_HEX)).toBeInTheDocument();
+        });
+
+        fireEvent.click(screen.getByLabelText('Copy SHA-256 checksum'));
+
+        await waitFor(() => {
+            expect(writeText).toHaveBeenCalledWith(MOCK_DIGEST_HEX);
+        });
+    });
+
+    it('includes the SHA-256 digest in the upload request metadata', async () => {
+        render(<VideoUploadCard {...defaultProps} />);
+
+        const file = new File(['test'], 'test.mp4', { type: 'video/mp4' });
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+        Object.defineProperty(fileInput, 'files', {
+            value: [file],
+        });
+
+        fireEvent.change(fileInput);
+
+        await waitFor(() => {
+            expect(mockXhr.send).toHaveBeenCalled();
+        });
+
+        const formData = (mockXhr.send as jest.Mock).mock.calls[0][0] as FormData;
+        expect(formData).toBeInstanceOf(FormData);
+        expect(formData.get('sha256')).toBe(MOCK_DIGEST_HEX);
+    });
+
+    it('rejects unsupported MIME types without starting an upload', async () => {
+        render(<VideoUploadCard {...defaultProps} />);
+
+        const file = new File(['test'], 'test.txt', { type: 'text/plain' });
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+        Object.defineProperty(fileInput, 'files', {
+            value: [file],
+        });
+
+        fireEvent.change(fileInput);
+
+        await waitFor(() => {
+            expect(screen.getByText(/unsupported/i)).toBeInTheDocument();
+        });
+        expect(mockXhr.open).not.toHaveBeenCalled();
+        expect(mockXhr.send).not.toHaveBeenCalled();
+    });
+
+    it('rejects zero-byte files without starting an upload', async () => {
+        render(<VideoUploadCard {...defaultProps} />);
+
+        const file = new File([], 'empty.mp4', { type: 'video/mp4' });
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+        Object.defineProperty(fileInput, 'files', {
+            value: [file],
+        });
+
+        fireEvent.change(fileInput);
+
+        await waitFor(() => {
+            expect(screen.getByText(/empty/i)).toBeInTheDocument();
+        });
+        expect(mockXhr.open).not.toHaveBeenCalled();
+        expect(mockXhr.send).not.toHaveBeenCalled();
+    });
+
+    it('rejects files larger than 50 MB without starting an upload', async () => {
+        render(<VideoUploadCard {...defaultProps} />);
+
+        const file = new File(['test'], 'large.mp4', { type: 'video/mp4' });
+        Object.defineProperty(file, 'size', { value: 51 * 1024 * 1024 });
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+        Object.defineProperty(fileInput, 'files', {
+            value: [file],
+        });
+
+        fireEvent.change(fileInput);
+
+        await waitFor(() => {
+            expect(screen.getByText(/50 MB/i)).toBeInTheDocument();
+        });
+        expect(mockXhr.open).not.toHaveBeenCalled();
+        expect(mockXhr.send).not.toHaveBeenCalled();
+    });
+
+    it('displays duration and resolution preview after metadata loads', async () => {
+        render(<VideoUploadCard {...defaultProps} />);
+
+        const file = new File(['test'], 'test.mp4', { type: 'video/mp4' });
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+        Object.defineProperty(fileInput, 'files', {
+            value: [file],
+        });
+
+        fireEvent.change(fileInput);
+
+        await waitFor(() => {
+            expect(screen.getByText(/0:30/)).toBeInTheDocument();
+            expect(screen.getByText(/1920\s*[x×]\s*1080/)).toBeInTheDocument();
+        });
+    });
+
+    it('rejects videos shorter than the minimum duration', async () => {
+        mockVideoMetadata.duration = 2;
+        render(<VideoUploadCard {...defaultProps} />);
+
+        const file = new File(['test'], 'test.mp4', { type: 'video/mp4' });
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+        Object.defineProperty(fileInput, 'files', {
+            value: [file],
+        });
+
+        fireEvent.change(fileInput);
+
+        await waitFor(() => {
+            expect(screen.getByText(/duration/i)).toBeInTheDocument();
+        });
+        expect(mockXhr.open).not.toHaveBeenCalled();
+        expect(mockXhr.send).not.toHaveBeenCalled();
+    });
+
+    it('rejects videos longer than the maximum duration', async () => {
+        mockVideoMetadata.duration = 200;
+        render(<VideoUploadCard {...defaultProps} />);
+
+        const file = new File(['test'], 'test.mp4', { type: 'video/mp4' });
+        const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement;
+
+        Object.defineProperty(fileInput, 'files', {
+            value: [file],
+        });
+
+        fireEvent.change(fileInput);
+
+        await waitFor(() => {
+            expect(screen.getByText(/duration/i)).toBeInTheDocument();
+        });
+        expect(mockXhr.open).not.toHaveBeenCalled();
+        expect(mockXhr.send).not.toHaveBeenCalled();
     });
 });

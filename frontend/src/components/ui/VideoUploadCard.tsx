@@ -18,6 +18,78 @@ const UPLOAD_ENDPOINT = "https://api.pinata.cloud/pinning/pinFileToIPFS";
 const IPFS_GATEWAY = "https://gateway.pinata.cloud";
 const QUEUE_STORAGE_KEY = "pod-video-upload-queue";
 
+/** Maximum accepted file size for uploads (50 MB). */
+const MAX_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+/** Accepted web-playable video MIME types. */
+const SUPPORTED_VIDEO_TYPES = ["video/mp4", "video/webm"];
+/** Duration bounds (seconds) for uploaded proof videos. */
+const MIN_DURATION_SECONDS = 5;
+const MAX_DURATION_SECONDS = 180;
+
+interface VideoMetadata {
+  duration: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * Load a video blob into an offscreen <video> element and read its duration
+ * and intrinsic resolution from the `loadedmetadata` event.
+ */
+function readVideoMetadata(blob: Blob): Promise<VideoMetadata> {
+  return new Promise((resolve, reject) => {
+    if (typeof document === "undefined") {
+      reject(new Error("Video metadata unavailable"));
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const el = document.createElement("video");
+    el.preload = "metadata";
+    el.muted = true;
+    const cleanup = () => {
+      el.onloadedmetadata = null;
+      el.onerror = null;
+      URL.revokeObjectURL(url);
+    };
+    el.onloadedmetadata = () => {
+      const duration = el.duration;
+      const width = el.videoWidth;
+      const height = el.videoHeight;
+      cleanup();
+      if (!Number.isFinite(duration) || duration <= 0) {
+        reject(new Error("Unable to read video duration"));
+        return;
+      }
+      resolve({ duration, width, height });
+    };
+    el.onerror = () => {
+      cleanup();
+      reject(new Error("Unable to read video metadata"));
+    };
+    el.src = url;
+  });
+}
+
+/** Validate a selected file's type and size before upload. */
+function validateFile(file: File): string | null {
+  if (file.size === 0) return "Selected file is empty (0 bytes).";
+  if (!SUPPORTED_VIDEO_TYPES.includes(file.type)) {
+    return "Unsupported video format. Please upload an MP4 or WebM file.";
+  }
+  if (file.size > MAX_FILE_SIZE_BYTES) {
+    return "Video exceeds the 50 MB maximum file size.";
+  }
+  return null;
+}
+
+function formatDuration(seconds: number): string {
+  const total = Math.round(seconds);
+  const mins = Math.floor(total / 60);
+  const secs = total % 60;
+  return `${mins}:${secs.toString().padStart(2, "0")}`;
+}
+=======
+
 interface QueuedUpload {
   hash: string;
   name: string;
@@ -95,9 +167,17 @@ async function uploadToIpfs(
   name: string,
   onProgress: (pct: number) => void,
   onRequest?: (request: XMLHttpRequest) => void,
+  sha256?: string,
 ): Promise<string> {
   const data = new FormData();
   data.append("file", blob, name);
+  if (sha256) {
+    data.append("sha256", sha256);
+    data.append(
+      "pinataMetadata",
+      JSON.stringify({ name, keyvalues: { sha256 } }),
+    );
+  }
 
   return new Promise<string>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
@@ -148,6 +228,8 @@ export function VideoUploadCard({
   const [preview, setPreview] = useState<string | null>(null);
   const [ipfsHash, setIpfsHash] = useState<string | null>(null);
   const [localHash, setLocalHash] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
+  const [metadata, setMetadata] = useState<VideoMetadata | null>(null);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -184,9 +266,10 @@ export function VideoUploadCard({
       return hash;
     });
     try {
+      const sha256 = await hashPromise;
       const cid = await uploadToIpfs(blob, name, setProgress, (request) => {
         uploadRequestRef.current = request;
-      });
+      }, sha256);
       setIpfsHash(cid);
       onUpload?.(cid);
     } catch (err) {
@@ -210,9 +293,50 @@ export function VideoUploadCard({
     if (!file) return;
     abortUpload();
     setIpfsHash(null);
+    setLocalHash(null);
+    setMetadata(null);
+    setCopied(false);
+    setError(null);
+
+    const validationError = validateFile(file);
+    if (validationError) {
+      setError(validationError);
+      setPreview(null);
+      return;
+    }
+
+    let info: VideoMetadata;
+    try {
+      info = await readVideoMetadata(file);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to read video metadata");
+      setPreview(null);
+      return;
+    }
+
+    if (info.duration < MIN_DURATION_SECONDS || info.duration > MAX_DURATION_SECONDS) {
+      setError(
+        `Video duration must be between ${MIN_DURATION_SECONDS}s and ${MAX_DURATION_SECONDS}s.`,
+      );
+      setPreview(null);
+      return;
+    }
+
+    setMetadata(info);
     setPreview(URL.createObjectURL(file));
     void handleBlob(file, file.name);
   }, [handleBlob]);
+
+  const copyHash = useCallback(async () => {
+    if (!localHash) return;
+    try {
+      await navigator.clipboard.writeText(localHash);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard unavailable — ignore */
+    }
+  }, [localHash]);
 
   const stopRecording = useCallback(() => {
     stopTimer();
@@ -288,7 +412,7 @@ export function VideoUploadCard({
         const blob = dataUrlToBlob(item.dataUrl);
         const cid = await uploadToIpfs(blob, item.name, setProgress, (request) => {
           uploadRequestRef.current = request;
-        });
+        }, item.hash);
         setIpfsHash(cid);
         onUpload?.(cid);
       } catch {
@@ -419,11 +543,32 @@ export function VideoUploadCard({
         )}
       </div>
 
-      {/* Local hash + dedupe indicator */}
-      {localHash && (
-        <p className="mt-2 text-[11px] text-text-muted truncate" title={localHash}>
-          {translateCopy("ui.local_hash_prefix")} {localHash.slice(0, 16)}…
+      {/* Video metadata preview */}
+      {metadata && (
+        <p className="mt-2 text-[11px] text-text-muted">
+          {formatDuration(metadata.duration)} · {metadata.width}×{metadata.height}
         </p>
+      )}
+
+      {/* SHA-256 digest + copy button */}
+      {localHash && (
+        <div className="mt-2 flex items-center gap-2">
+          <p
+            className="text-[11px] text-text-muted truncate flex-1"
+            title={localHash}
+            data-testid="sha256-digest"
+          >
+            SHA-256: {localHash}
+          </p>
+          <button
+            type="button"
+            onClick={copyHash}
+            aria-label={translateCopy("ui.copy_sha256_digest")}
+            className="shrink-0 text-[11px] text-gold hover:text-gold-hover transition-colors"
+          >
+            {copied ? translateCopy("ui.copied") : translateCopy("ui.copy")}
+          </button>
+        </div>
       )}
 
       {/* Offline queue */}
