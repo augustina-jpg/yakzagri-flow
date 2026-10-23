@@ -25,6 +25,12 @@ export default function Step2Negotiation() {
   const buyerLoss = totalValue ? formatNumber((data.buyerRatio / 100) * totalValue) : "—";
   const sellerLoss = totalValue ? formatNumber((data.sellerRatio / 100) * totalValue) : "—";
 
+  const buyerRefund = totalValue ? (data.buyerRatio / 100) * totalValue : 0;
+  const sellerPayout = totalValue ? (data.sellerRatio / 100) * totalValue : 0;
+
+  const presetRatios = [50, 70, 80, 100];
+=======
+
   const handleBlur = (field: string) => {
     setTouched((prev) => ({ ...prev, [field]: true }));
     const errs = validateStep2({
@@ -80,6 +86,27 @@ export default function Step2Negotiation() {
           className="w-full accent-gold"
         />
 
+        <div className="flex flex-wrap gap-2" role="group" aria-label="Preset loss ratios">
+          {presetRatios.map((ratio) => {
+            const active = data.buyerRatio === ratio;
+            return (
+              <button
+                key={ratio}
+                type="button"
+                onClick={() => handleBuyerRatio(ratio)}
+                aria-pressed={active}
+                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                  active
+                    ? "bg-gold text-text-inverse border-gold"
+                    : "bg-bg-elevated text-text-secondary border-border-default hover:border-border-hover"
+                }`}
+              >
+                {ratio}/{100 - ratio}
+              </button>
+            );
+          })}
+        </div>
+
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-lg bg-bg-elevated border border-border-default px-4 py-3">
             <p className="text-xs text-text-muted mb-1">{translateCopy("ui.buyer_absorbs_319cfa2")}</p>
@@ -97,6 +124,36 @@ export default function Step2Negotiation() {
           </div>
         </div>
         {errors.sum && touched.buyerRatio && <p role="alert" aria-live="polite" className="text-status-danger text-xs text-center">{errors.sum}</p>}
+
+        {/* Live payout breakdown */}
+        <div className="rounded-lg bg-bg-elevated border border-border-default px-4 py-3 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-text-muted">Loss payout preview</span>
+            <span className="text-xs text-text-secondary">
+              Trade amount: {totalValue > 0 ? `${data.currency} ${formatNumber(totalValue)}` : "—"}
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <p className="text-xs text-text-muted mb-1">Buyer refund</p>
+              <p className="text-text-primary font-semibold text-sm">
+                {totalValue > 0 ? `${formatNumber(buyerRefund)} cNGN` : "—"}
+              </p>
+              <p className="text-xs text-text-secondary mt-0.5">
+                {totalValue > 0 ? `≈ ₦${formatNumber(buyerRefund)}` : "—"}
+              </p>
+            </div>
+            <div>
+              <p className="text-xs text-text-muted mb-1">Seller payout</p>
+              <p className="text-text-primary font-semibold text-sm">
+                {totalValue > 0 ? `${formatNumber(sellerPayout)} cNGN` : "—"}
+              </p>
+              <p className="text-xs text-text-secondary mt-0.5">
+                {totalValue > 0 ? `≈ ₦${formatNumber(sellerPayout)}` : "—"}
+              </p>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Delivery window */}

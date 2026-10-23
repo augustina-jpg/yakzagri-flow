@@ -394,4 +394,157 @@ describe("useCurrencyInput", () => {
       expect(result.current.stroops).toBe("1");
     });
   });
+
+  describe("Paste sanitization", () => {
+    it("parses pasted formatted currency string with symbol and separators", () => {
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: STELLAR_ASSETS.NGN })
+      );
+
+      act(() => {
+        result.current.setValue("₦1,250,500.75");
+      });
+
+      expect(result.current.value).toBe("1250500.75");
+      expect(result.current.isValid).toBe(true);
+      expect(result.current.error).toBeNull();
+      expect(result.current.stroops).toBe("12505007500000");
+    });
+
+    it("ignores a second decimal point", () => {
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: STELLAR_ASSETS.USDC })
+      );
+
+      act(() => {
+        result.current.setValue("12.34.56");
+      });
+
+      expect(result.current.value).toBe("12.34");
+      expect(result.current.isValid).toBe(true);
+      expect(result.current.stroops).toBe("123400000");
+    });
+
+    it("clamps fractional digits to the asset's configured decimals", () => {
+      const customAsset = {
+        code: "CUSTOM",
+        decimals: 2,
+        symbol: "CUST",
+        name: "Custom Token",
+        type: "credit_alphanum4" as const,
+      };
+
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: customAsset })
+      );
+
+      act(() => {
+        result.current.setValue("100.555");
+      });
+
+      expect(result.current.value).toBe("100.55");
+      expect(result.current.isValid).toBe(true);
+      expect(result.current.stroops).toBe("10055");
+    });
+
+    it("clamps pasted fractional digits to 7 decimals for USDC", () => {
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: STELLAR_ASSETS.USDC })
+      );
+
+      act(() => {
+        result.current.setValue("100.123456789");
+      });
+
+      expect(result.current.value).toBe("100.1234567");
+      expect(result.current.isValid).toBe(true);
+      expect(result.current.stroops).toBe("1001234567");
+    });
+
+    it("strips currency symbols and separators from pasted strings", () => {
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: STELLAR_ASSETS.USDC })
+      );
+
+      act(() => {
+        result.current.setValue("$ 1,000.50");
+      });
+
+      expect(result.current.value).toBe("1000.50");
+      expect(result.current.isValid).toBe(true);
+      expect(result.current.stroops).toBe("10005000000");
+    });
+  });
+
+  describe("Mobile input edge cases", () => {
+    it("handles leading decimal point", () => {
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: STELLAR_ASSETS.USDC })
+      );
+
+      act(() => {
+        result.current.setValue(".5");
+      });
+
+      expect(result.current.value).toBe("0.5");
+      expect(result.current.isValid).toBe(true);
+      expect(result.current.stroops).toBe("5000000");
+    });
+
+    it("handles trailing decimal point without NaN", () => {
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: STELLAR_ASSETS.USDC })
+      );
+
+      act(() => {
+        result.current.setValue("12.");
+      });
+
+      expect(result.current.value).toBe("12");
+      expect(result.current.isValid).toBe(true);
+      expect(result.current.stroops).toBe("120000000");
+    });
+
+    it("strips whitespace and symbols without producing NaN", () => {
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: STELLAR_ASSETS.EURC })
+      );
+
+      act(() => {
+        result.current.setValue(" € 1 234.56 ");
+      });
+
+      expect(result.current.value).toBe("1234.56");
+      expect(result.current.isValid).toBe(true);
+      expect(result.current.stroops).toBe("12345600000");
+    });
+
+    it("handles non-numeric paste gracefully", () => {
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: STELLAR_ASSETS.USDC })
+      );
+
+      act(() => {
+        result.current.setValue("abc");
+      });
+
+      expect(result.current.value).toBe("");
+      expect(result.current.stroops).toBeNull();
+      expect(result.current.isValid).toBe(false);
+    });
+
+    it("handles multiple decimal points with symbols", () => {
+      const { result } = renderHook(() =>
+        useCurrencyInput({ asset: STELLAR_ASSETS.NGN })
+      );
+
+      act(() => {
+        result.current.setValue("₦1,250.50.75");
+      });
+
+      expect(result.current.value).toBe("1250.50");
+      expect(result.current.isValid).toBe(true);
+      expect(result.current.stroops).toBe("12505000000");
+    });
+  });
 });

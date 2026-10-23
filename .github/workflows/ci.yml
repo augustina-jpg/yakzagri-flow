@@ -89,6 +89,10 @@ jobs:
         if: needs.changes.outputs.frontend == 'true'
         run: node scripts/check-tailwind-colors.mjs
 
+      - name: Env example keys in sync
+        if: needs.changes.outputs.frontend == 'true'
+        run: node scripts/check-env-example.mjs
+
       - name: Type check
         run: npx tsc --noEmit
 
@@ -153,15 +157,18 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Restore Next.js build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: frontend/.next/cache
           key: ${{ runner.os }}-nextjs-${{ hashFiles('frontend/pnpm-lock.yaml') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('frontend/pnpm-lock.yaml') }}-
+            ${{ runner.os }}-nextjs-${{ hashFiles('frontend/pnpm-lock.yaml') }}
 
       - name: Build
         run: pnpm build
+
+      - name: Bundle size budget check
+        run: pnpm bundle:check
 
   frontend:
     name: Frontend Required Gate
@@ -222,12 +229,12 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Restore Next.js build cache
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: frontend/.next/cache
           key: ${{ runner.os }}-nextjs-${{ hashFiles('frontend/pnpm-lock.yaml') }}-${{ github.sha }}
           restore-keys: |
-            ${{ runner.os }}-nextjs-${{ hashFiles('frontend/pnpm-lock.yaml') }}-
+            ${{ runner.os }}-nextjs-${{ hashFiles('frontend/pnpm-lock.yaml') }}
 
       - name: Install Playwright browsers (Chromium only)
         if: steps.baselines.outputs.present == 'true'
@@ -256,64 +263,13 @@ jobs:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
           NEXT_PUBLIC_API_VERSION_PREFIX: /api/v1
 
-      - name: Upload visual regression report on failure
+      - name: Upload Playwright failure artifacts
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: visual-regression-report
+          name: playwright-failure-artifacts
           path: |
             frontend/playwright-report/
             frontend/test-results/
           retention-days: 14
-
-  e2e:
-    name: E2E (Playwright)
-    runs-on: ubuntu-latest
-    needs: [changes, frontend]
-    if: needs.changes.outputs.frontend == 'true'
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v6
-
-      - name: Setup Node
-        uses: actions/setup-node@v7
-        with:
-          node-version: 22
-          cache: pnpm
-          cache-dependency-path: frontend/pnpm-lock.yaml
-
-      - name: Install deps
-        run: pnpm install --frozen-lockfile
-
-      - name: Install Playwright browsers (Chromium only)
-        run: pnpm exec playwright install chromium --with-deps
-
-      - name: Build Next.js app
-        run: pnpm build
-        env:
-          NEXT_PUBLIC_API_URL: http://localhost:4000
-          NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
-
-      - name: Run E2E suite (e2e-chromium)
-        run: pnpm exec playwright test --project=e2e-chromium
-        env:
-          CI: true
-          NEXT_PUBLIC_API_URL: http://localhost:4000
-          NEXT_PUBLIC_API_BASE_URL: http://localhost:4000
-
-      - name: Upload E2E report on failure
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: e2e-report
-          path: |
-            frontend/playwright-report/
-            frontend/test-results/
-          retention-days: 14
+          if-no-files-found: ignore

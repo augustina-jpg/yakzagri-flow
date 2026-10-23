@@ -19,6 +19,13 @@ import { decodeTokenPayload, getTokenExpiryMs, isTokenExpired, isTokenValid } fr
 const TOKEN_STORAGE_KEY = "amana_jwt";
 const TOKEN_ADDRESS_STORAGE_KEY = "amana_jwt_address";
 
+// User-scoped localStorage caches that must be purged on explicit wallet disconnect.
+const USER_SCOPED_STORAGE_KEYS = [
+  "offlineCache",
+  "notificationStore",
+  "tradeDrafts",
+] as const;
+
 // Refresh the session this long before the backend-issued JWT actually expires.
 const REFRESH_BUFFER_MS = 60 * 1000;
 
@@ -60,6 +67,22 @@ function clearStoredToken(): void {
   if (typeof window === "undefined") return;
   sessionStorage.removeItem(TOKEN_STORAGE_KEY);
   sessionStorage.removeItem(TOKEN_ADDRESS_STORAGE_KEY);
+}
+
+/**
+ * Purge user-scoped localStorage caches (offline queue, notifications, trade
+ * drafts) so sensitive data does not survive an explicit wallet disconnect.
+ * Missing keys and storage failures are tolerated.
+ */
+function clearUserScopedCaches(): void {
+  if (typeof window === "undefined") return;
+  try {
+    for (const key of USER_SCOPED_STORAGE_KEYS) {
+      localStorage.removeItem(key);
+    }
+  } catch (error) {
+    console.warn("Failed to clear user-scoped caches:", error);
+  }
 }
 
 function getTokenAddress(token: string): string | null {
@@ -185,6 +208,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Clear all auth-related storage
     clearStoredToken();
+    // Purge user-scoped caches (offline queue, notifications, trade drafts).
+    clearUserScopedCaches();
     if (typeof window !== "undefined" && "caches" in window) {
       try {
         await window.caches.delete("amana-api-cache-v1");
@@ -283,8 +308,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       isWalletConnected: identity.isAuthorized,
       isWalletDetected: identity.isWalletDetected,
       isLoading: state.isLoading || identity.isLoading,
-      error: state.error ?? identity.error,
-      connectWallet: identity.connectWallet,
+      error: state.error,
+      connectWallet: identity.connect,
       authenticate,
       logout,
       refreshAuth,
@@ -292,17 +317,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [state, identity, authenticate, logout, refreshAuth]
   );
 
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
-  );
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 
 export function useAuth(): AuthContextType {
-  const ctx = useContext(AuthContext);
-  if (!ctx) {
-    throw new Error('useAuth must be used within an AuthProvider');
+  const context = useContext(AuthContext);
+  if (!context) {
+    throw new Error("useAuth must be used within an AuthProvider");
   }
-  return ctx;
+  return context;
 }

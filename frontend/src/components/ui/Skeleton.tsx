@@ -56,7 +56,7 @@ export function Skeleton({
     radius === undefined && VARIANT_RADIUS_CLASS[variant],
     "motion-safe:animate-skeleton-pulse motion-reduce:animate-none",
     shimmer &&
-      "after:absolute after:inset-0 after:-translate-x-full after:bg-linear-to-r after:from-transparent after:via-skeleton-sheen after:to-transparent motion-safe:after:animate-skeleton-shimmer",
+      "after:absolute after:inset-0 after:-translate-x-full after:bg-linear-to-r after:from-transparent after:via-skeleton-sheen after:to-transparent motion-safe:after:animate-skeleton-shimmer motion-reduce:after:animate-none motion-reduce:after:hidden",
     className,
   );
 

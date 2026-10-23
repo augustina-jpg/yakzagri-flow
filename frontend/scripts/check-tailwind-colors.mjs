@@ -11,6 +11,11 @@
  * Tailwind palette, arbitrary values (`bg-[#101E18F2]`) or non-colour utilities
  * (`text-sm`, `border-2`, `ring-offset-2`, ...).
  *
+ * The check also enforces the single naming convention for the elevated/surface
+ * tokens: the canonical names are `surface`, `surface-elevated` and `surface-card`.
+ * The legacy aliases `bg-elevated`, `bg-bg-elevated`, `bg-card` and `bg-bg-card`
+ * are reported as violations so the codebase can't drift back into mixed names.
+ *
  * Usage: node scripts/check-tailwind-colors.mjs
  */
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -62,6 +67,17 @@ const SEMANTIC_NAMESPACES = [
   "teal",
 ];
 
+/**
+ * Legacy / inconsistent token names that must not appear in source. The
+ * canonical names are `surface`, `surface-elevated` and `surface-card`.
+ */
+const FORBIDDEN_TOKENS = new Set([
+  "elevated",
+  "bg-elevated",
+  "card",
+  "bg-card",
+]);
+
 const STOCK_PALETTES = [
   "slate",
   "gray",
@@ -90,8 +106,7 @@ const SHADES = new Set([50, 100, 200, 300, 400, 500, 600, 700, 800, 900, 950]);
 
 // `bg-surface-2`, `hover:text-text-muted`, `focus:ring-offset-2`, `bg-bg-elevated/80`, ...
 const UTILITY_RE = new RegExp(
-  String.raw`(?<![\w-])(?:(?:[a-z][a-z0-9-]*):)*` +
-    String.raw`((?:${UTILITY_PREFIXES.join("|")})-[a-z0-9][a-z0-9-]*)`,
+  String.raw`(?<![\w-])(?:(?:[a-z][a-z0-9-]*:)*)((?:${UTILITY_PREFIXES.join("|")})-[a-z0-9][a-z0-9-]*)`,
   "g",
 );
 
@@ -134,7 +149,7 @@ function walk(dir) {
 }
 
 function isBuiltIn(token) {
-  const shade = /^([a-z]+)-(\d{2,3})$/.exec(token);
+  const shade = /^([a-z-]+)-(\d{2,3})$/.exec(token);
   if (shade && STOCK_PALETTES.includes(shade[1]) && SHADES.has(Number(shade[2]))) {
     return true;
   }
@@ -154,7 +169,10 @@ function colourToken(utility) {
 
 function main() {
   const defined = readDefinedTokens();
-  const problems = [];
+  const problems = [
+    // The legacy aliases are defined in the config so the defined-token check
+    // would otherwise pass; forbid them explicitly instead.
+  ];
   let files = [];
   try {
     files = walk(SRC_DIR);
@@ -168,15 +186,23 @@ function main() {
     for (const match of source.matchAll(UTILITY_RE)) {
       const utility = match[1];
       const token = colourToken(utility);
-      if (!token || isBuiltIn(token) || defined.has(token)) continue;
+      if (!token) continue;
+      const relative = file.slice(FRONTEND_DIR.length + 1);
+      if (FORBIDDEN_TOKENS.has(token)) {
+        problems.push(
+          `${relative}: "${utility}" uses legacy colour token "${token}" (use "surface", "surface-elevated" or "surface-card")`,
+        );
+        continue;
+      }
+      if (isBuiltIn(token) || defined.has(token)) continue;
       problems.push(
-        `${file.slice(FRONTEND_DIR.length + 1)}: "${utility}" uses undefined colour token "${token}"`,
+        `${relative}: "${utility}" uses undefined colour token "${token}"`,
       );
     }
   }
 
   if (problems.length > 0) {
-    console.error("Undefined semantic Tailwind colour utilities found:\n");
+    console.error("Undefined or inconsistent semantic Tailwind colour utilities found:\n");
     for (const problem of problems) console.error(`  - ${problem}`);
     console.error(
       "\nDefine the token in tailwind.config.ts and the matching --color-* variable in src/app/globals.css.",

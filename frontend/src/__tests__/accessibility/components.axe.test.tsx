@@ -146,4 +146,62 @@ describe("Accessibility audit — WCAG 2.1 AA", () => {
       expect(await axe(container)).toHaveNoViolations();
     });
   });
+
+  describe("Interactive modal and stepper states", () => {
+    it("trade action modal (deposit/withdraw) has no axe violations", async () => {
+      const { container } = render(
+        <div role="dialog" aria-modal="true" aria-labelledby="trade-modal-title">
+          <h2 id="trade-modal-title">Trade actions</h2>
+          <TradeListItem
+            tradeId="trade-002"
+            commodity="Crude Oil"
+            counterparty={{ role: "Seller", address: "0xabcdef1234567890" }}
+            amountCngn="250,000"
+            status="PENDING"
+            createdAt="2026-06-02T10:00:00Z"
+            onView={() => {}}
+            onDeposit={() => {}}
+            onWithdraw={() => {}}
+          />
+          <Button variant="primary">Confirm</Button>
+          <Button variant="secondary">Cancel</Button>
+        </div>
+      );
+      expect(await axe(container)).toHaveNoViolations();
+    });
+
+    it("dispute stepper step has no axe violations", async () => {
+      const { container } = render(
+        <div>
+          <ol aria-label="Dispute resolution steps">
+            <li aria-current="step">1. Open dispute</li>
+            <li>2. Provide evidence</li>
+            <li>3. Resolution</li>
+          </ol>
+          <FormField label="Reason" name="reason" required>
+            <textarea />
+          </FormField>
+          <Button variant="primary">Next</Button>
+        </div>
+      );
+      expect(await axe(container)).toHaveNoViolations();
+    });
+
+    it("vault deposit stepper step has no axe violations", async () => {
+      const { container } = render(
+        <div>
+          <ol aria-label="Vault deposit steps">
+            <li aria-current="step">1. Select amount</li>
+            <li>2. Confirm</li>
+          </ol>
+          <FormField label="Amount" name="amount" required>
+            <input type="number" inputMode="decimal" />
+          </FormField>
+          <StatusBadge status="pending" />
+          <Button variant="primary">Deposit</Button>
+        </div>
+      );
+      expect(await axe(container)).toHaveNoViolations();
+    });
+  });
 });

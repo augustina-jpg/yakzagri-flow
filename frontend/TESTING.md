@@ -53,6 +53,17 @@ Visual snapshot tests live under `tests/visual` and are executed with Playwright
 
 Snapshot tests are structured for both mobile and desktop viewports.
 
+### End-to-End Tests
+End-to-end flows live under `tests/e2e` and are executed with Playwright.
+
+- `tests/e2e/trade-lifecycle.spec.ts` covers the seller dispatch manifest
+  submission (`DriverManifestForm`) and the buyer Proof-of-Delivery (PoD)
+  video evidence upload end-to-end.
+- The seller flow fills the manifest form, submits it, and asserts the
+  success state; the buyer flow uploads a PoD video file and asserts the
+  evidence is accepted.
+- Run the suite with `npm run test:e2e` (or `pnpm test:e2e`).
+
 ### Unit Tests
 Place unit tests in `__tests__` directories next to the components:
 ```

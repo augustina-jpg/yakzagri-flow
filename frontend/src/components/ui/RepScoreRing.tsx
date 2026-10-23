@@ -76,7 +76,11 @@ export function RepScoreRing({
           strokeDasharray={circumference}
           strokeDashoffset={dashOffset}
           transform={`rotate(-90 ${center} ${center})`}
-          className={animated ? "transition-all duration-1000" : undefined}
+          className={
+            animated
+              ? "motion-safe:transition-all motion-safe:duration-1000 motion-reduce:transition-none"
+              : undefined
+          }
           style={{ strokeDashoffset: dashOffset }}
         />
 

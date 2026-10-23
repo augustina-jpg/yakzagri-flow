@@ -57,6 +57,34 @@ export function webUrlForTrade(tradeId: string): string {
   return `${WEB_ORIGIN}/trades/${encodeURIComponent(tradeId)}`;
 }
 
+/** Stellar network the frontend is configured against. */
+export type StellarNetwork = "testnet" | "mainnet";
+
+const STELLAR_EXPLORER_BASE: Record<StellarNetwork, string> = {
+  testnet: "https://stellar.expert/explorer/testnet",
+  mainnet: "https://stellar.expert/explorer/public",
+};
+
+/**
+ * Resolve the active Stellar network from the public env var
+ * (`NEXT_PUBLIC_STELLAR_NETWORK`), defaulting to testnet.
+ */
+export function stellarNetwork(): StellarNetwork {
+  const raw = (process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? "").trim().toLowerCase();
+  return raw === "mainnet" || raw === "public" ? "mainnet" : "testnet";
+}
+
+/**
+ * Explorer URL for a Stellar transaction hash, so the trade detail page can
+ * render a clickable link once a Soroban transaction is confirmed.
+ */
+export function stellarExplorerTxUrl(
+  hash: string,
+  network: StellarNetwork = stellarNetwork(),
+): string {
+  return `${STELLAR_EXPLORER_BASE[network]}/tx/${encodeURIComponent(hash)}`;
+}
+
 /** Deep (custom-scheme) URL for the current web path, or null if not mappable. */
 export function appUrlForPath(pathname: string): string | null {
   for (const route of ROUTES) {
@@ -72,44 +100,56 @@ export function screenForPath(pathname: string): DeepLinkScreen | null {
 }
 
 /**
- * Ordered IPFS gateway base URLs used to resolve `ipfs://` / CID evidence links.
- *
- * The first entry can be overridden via `NEXT_PUBLIC_IPFS_GATEWAY`; the rest are
- * public fallbacks tried in order when the primary gateway is slow or rate-limited.
+ * Whether the app is running in a development environment. Read lazily so the
+ * check reflects the current runtime (and stays testable via env stubs).
  */
-export const IPFS_GATEWAYS: string[] = [
-  process.env.NEXT_PUBLIC_IPFS_GATEWAY?.trim() || "https://gateway.pinata.cloud/ipfs/",
-  "https://ipfs.io/ipfs/",
-].map((g) => (g.endsWith("/") ? g : `${g}/`));
-
-const CID_V0 = /^Qm[1-9A-HJ-NP-Za-km-z]{44}$/;
-const CID_V1 = /^b[a-z2-7]{58,}$/i;
-
-/** Extract a bare IPFS CID from an `ipfs://` URL, gateway URL or raw CID string. */
-export function extractIpfsCid(value: string): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  if (!trimmed) return null;
-
-  if (trimmed.startsWith("ipfs://")) {
-    const rest = trimmed.slice("ipfs://".length).replace(/^ipfs\//, "");
-    const cid = rest.split(/[/?#]/)[0];
-    return cid || null;
+function isDevEnvironment(): boolean {
+  try {
+    const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+    return env?.MODE === "development" || env?.DEV === "true";
+  } catch {
+    return false;
   }
-
-  if (CID_V0.test(trimmed) || CID_V1.test(trimmed)) return trimmed;
-
-  // Gateway URL: .../ipfs/<cid>[/...]
-  const m = trimmed.match(/\/ipfs\/([^/?#]+)/);
-  if (m) return m[1] || null;
-
-  return null;
 }
 
-/** Build a gateway URL for `cid` using the gateway at `gatewayIndex` (null if out of range). */
-export function buildIpfsGatewayUrl(cid: string, gatewayIndex = 0): string | null {
-  if (!cid) return null;
-  const gateway = IPFS_GATEWAYS[gatewayIndex];
-  if (!gateway) return null;
-  return `${gateway}${encodeURIComponent(cid)}`;
+/**
+ * Sanitize an external URL so it is safe to use as an `href`.
+ *
+ * Only `https://` URLs are permitted. In development, `http://localhost`
+ * (and `http://127.0.0.1`) are also allowed for local tooling. Everything
+ * else — including `javascript:`, `data:`, `vbscript:`, `file:`, and any
+ * obfuscated variants (mixed case, embedded whitespace/control characters,
+ * leading/trailing junk) — is rejected.
+ *
+ * Returns the normalized URL string when allowed, or `null` when rejected.
+ */
+export function sanitizeExternalUrl(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string") return null;
+
+  // Strip leading/trailing whitespace and any embedded control characters
+  // (e.g. "java\tscript:", "java\nscript:") that browsers may ignore.
+  const trimmed = raw.trim().replace(/[\u0000-\u001F\u007F\s]+/g, "");
+  if (!trimmed) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  const protocol = parsed.protocol.toLowerCase();
+
+  if (protocol === "https:") {
+    return parsed.toString();
+  }
+
+  if (protocol === "http:" && isDevEnvironment()) {
+    const host = parsed.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "[::1]") {
+      return parsed.toString();
+    }
+  }
+
+  return null;
 }

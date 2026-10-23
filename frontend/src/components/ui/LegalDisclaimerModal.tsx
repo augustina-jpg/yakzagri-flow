@@ -13,12 +13,50 @@ import {
   ModalTitle,
 } from "./Modal";
 
+export const LEGAL_POLICY_VERSION = "2026.1";
+const DISCLAIMER_STORAGE_PREFIX = "amana:legal-disclaimer:";
+
+export function getDisclaimerStorageKey(
+  walletAddress: string = "anonymous",
+  policyVersion: string = LEGAL_POLICY_VERSION,
+): string {
+  return `${DISCLAIMER_STORAGE_PREFIX}${walletAddress.toLowerCase()}:${policyVersion}`;
+}
+
+export function hasAcceptedLegalDisclaimer(
+  walletAddress?: string | null,
+  policyVersion: string = LEGAL_POLICY_VERSION,
+): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    const key = getDisclaimerStorageKey(walletAddress ?? "anonymous", policyVersion);
+    return window.localStorage.getItem(key) === "accepted";
+  } catch {
+    return false;
+  }
+}
+
+export function persistLegalDisclaimerAcceptance(
+  walletAddress?: string | null,
+  policyVersion: string = LEGAL_POLICY_VERSION,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const key = getDisclaimerStorageKey(walletAddress ?? "anonymous", policyVersion);
+    window.localStorage.setItem(key, "accepted");
+  } catch {
+    // Ignore storage errors in restricted environments.
+  }
+}
+
 interface LegalDisclaimerModalProps {
   isOpen: boolean;
   onAccept: () => void;
   onDecline: () => void;
   lossRatio: { buyer: number; seller: number };
   tradeValueCngn: string;
+  walletAddress?: string | null;
+  policyVersion?: string;
 }
 
 export function LegalDisclaimerModal({
@@ -27,9 +65,16 @@ export function LegalDisclaimerModal({
   onDecline,
   lossRatio,
   tradeValueCngn,
+  walletAddress,
+  policyVersion = LEGAL_POLICY_VERSION,
 }: LegalDisclaimerModalProps) {
   const buyerPercentage = lossRatio.buyer / 100;
   const sellerPercentage = lossRatio.seller / 100;
+
+  function handleAccept() {
+    persistLegalDisclaimerAcceptance(walletAddress, policyVersion);
+    onAccept();
+  }
 
   return (
     <Modal open={isOpen} onOpenChange={(open) => !open && onDecline()}>
@@ -40,7 +85,7 @@ export function LegalDisclaimerModal({
         <ModalHeader>
           <ModalTitle>{translateCopy("ui.loss_sharing_terms_4dec970")}</ModalTitle>
           <ModalDescription>
-            {translateCopy("ui.please_review_the_loss_sharing_a_ae16bb4")}
+            {translateCopy("ui.please_review_the_loss_sharing_a_ae16bb4")} (v{policyVersion})
           </ModalDescription>
         </ModalHeader>
 
@@ -96,7 +141,7 @@ export function LegalDisclaimerModal({
             {translateCopy("ui.decline_b59cf9e")}
           </button>
           <button
-            onClick={onAccept}
+            onClick={handleAccept}
             className="flex-1 px-4 py-2 rounded-lg bg-gold text-text-inverse font-medium hover:bg-gold-hover transition-colors"
           >
             {translateCopy("ui.accept_proceed_c4c3042")}

@@ -148,7 +148,7 @@ export default function LandingPage() {
               return (
                 <div
                   key={item.step}
-                  className="relative rounded-xl border border-border-default bg-bg-card p-6 shadow-card"
+                  className="relative rounded-xl border border-border-default bg-bg-card p-6 shadow-elev-1"
                 >
                   {/* Step number */}
                   <span className="text-xs font-bold tracking-widest text-text-muted">
@@ -186,7 +186,7 @@ export default function LandingPage() {
               return (
                 <div
                   key={feature.title}
-                  className="rounded-xl border border-border-default bg-bg-primary p-6 shadow-card"
+                  className="rounded-xl border border-border-default bg-bg-primary p-6 shadow-elev-1"
                 >
                   <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-gold-muted">
                     <Icon className="h-5 w-5 text-gold" />
@@ -206,7 +206,7 @@ export default function LandingPage() {
 
       {/* ── CTA ──────────────────────────────────────────────────────────── */}
       <section className="px-6 py-20 lg:px-10">
-        <div className="mx-auto max-w-3xl rounded-2xl border border-gold/20 bg-gradient-hero p-10 text-center shadow-card">
+        <div className="mx-auto max-w-3xl rounded-2xl border border-gold/20 bg-gradient-hero p-10 text-center shadow-elev-1">
           <h2 className="text-2xl font-bold md:text-3xl">
             {translateCopy("ui.ready_to_settle_your_first_trade_a627297")}
           </h2>

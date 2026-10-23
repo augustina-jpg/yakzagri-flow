@@ -1,8 +1,7 @@
 import {
   appUrlForPath,
-  buildIpfsGatewayUrl,
-  extractIpfsCid,
   screenForPath,
+  stellarExplorerTxUrl,
   webUrlForTrade,
 } from "@/lib/links";
 
@@ -28,64 +27,29 @@ describe("web <-> app link mapping", () => {
   });
 });
 
-describe("IPFS CID extraction", () => {
-  const cidV0 = "QmYwAPJzv5CZsnA625s3Xf2nemtYgPpHdWEz79ojWnPbdG";
-  const cidV1 = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
+describe("stellarExplorerTxUrl", () => {
+  const HASH = "3389e9f0f1a65f19736cacf544c2e825313e8447f569233bb8db39aa607c8889";
 
-  it("extracts the CID from ipfs:// URIs", () => {
-    expect(extractIpfsCid(`ipfs://${cidV0}`)).toBe(cidV0);
-    expect(extractIpfsCid(`ipfs://${cidV1}`)).toBe(cidV1);
-    expect(extractIpfsCid(`ipfs://${cidV1}/video.mp4`)).toBe(cidV1);
-  });
-
-  it("extracts bare CIDv0 and CIDv1 strings", () => {
-    expect(extractIpfsCid(cidV0)).toBe(cidV0);
-    expect(extractIpfsCid(cidV1)).toBe(cidV1);
-    expect(extractIpfsCid(`  ${cidV0}  `)).toBe(cidV0);
-  });
-
-  it("extracts the CID from gateway URLs", () => {
-    expect(extractIpfsCid(`https://ipfs.io/ipfs/${cidV0}`)).toBe(cidV0);
-    expect(extractIpfsCid(`https://gateway.pinata.cloud/ipfs/${cidV1}/video.mp4`)).toBe(
-      cidV1,
-    );
-    expect(extractIpfsCid(`https://dweb.link/ipfs/${cidV1}?filename=video.mp4`)).toBe(
-      cidV1,
+  it("builds a Stellar explorer URL for a transaction hash", () => {
+    expect(stellarExplorerTxUrl(HASH)).toBe(
+      `https://stellar.expert/explorer/testnet/tx/${HASH}`,
     );
   });
 
-  it("returns null for invalid input", () => {
-    expect(extractIpfsCid("")).toBeNull();
-    expect(extractIpfsCid("   ")).toBeNull();
-    expect(extractIpfsCid("not-a-cid")).toBeNull();
-    expect(extractIpfsCid("https://example.com/video.mp4")).toBeNull();
-    expect(extractIpfsCid("ipfs://")).toBeNull();
-  });
-});
-
-describe("IPFS gateway URL building", () => {
-  const cid = "bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi";
-
-  it("builds a URL for each gateway index", () => {
-    const primary = buildIpfsGatewayUrl(cid, 0);
-    const fallback = buildIpfsGatewayUrl(cid, 1);
-
-    expect(primary).not.toBeNull();
-    expect(fallback).not.toBeNull();
-    expect(primary).not.toBe(fallback);
-    expect(primary).toContain(cid);
-    expect(fallback).toContain(cid);
-    expect(primary).toMatch(/^https:\/\//);
-    expect(fallback).toMatch(/^https:\/\//);
+  it("supports a configurable network", () => {
+    expect(stellarExplorerTxUrl(HASH, "public")).toBe(
+      `https://stellar.expert/explorer/public/tx/${HASH}`,
+    );
   });
 
-  it("returns null for out-of-range indices", () => {
-    expect(buildIpfsGatewayUrl(cid, -1)).toBeNull();
-    expect(buildIpfsGatewayUrl(cid, 999)).toBeNull();
+  it("trims surrounding whitespace from the hash", () => {
+    expect(stellarExplorerTxUrl(`  ${HASH}  `)).toBe(
+      `https://stellar.expert/explorer/testnet/tx/${HASH}`,
+    );
   });
 
-  it("returns null for an invalid CID", () => {
-    expect(buildIpfsGatewayUrl("not-a-cid", 0)).toBeNull();
-    expect(buildIpfsGatewayUrl("", 0)).toBeNull();
+  it("returns null for an empty hash", () => {
+    expect(stellarExplorerTxUrl("")).toBeNull();
+    expect(stellarExplorerTxUrl("   ")).toBeNull();
   });
 });

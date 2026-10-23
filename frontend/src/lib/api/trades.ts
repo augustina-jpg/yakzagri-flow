@@ -77,6 +77,13 @@ export const tradesApi = {
       headers: withIdempotency(undefined, opts),
     }),
 
+  cancelTrade: (token: string, tradeId: string, opts?: { idempotencyKey?: string; correlationId?: string }) =>
+    request<TradeResponse>(`/trades/${tradeId}/cancel`, {
+      method: "POST",
+      token,
+      headers: withIdempotency(undefined, opts),
+    }),
+
   initiateDispute: (token: string, tradeId: string, reason: string, category: string, opts?: { idempotencyKey?: string; correlationId?: string }) =>
     request<{ unsignedXdr: string }>(`/trades/${tradeId}/dispute`, {
       method: "POST",

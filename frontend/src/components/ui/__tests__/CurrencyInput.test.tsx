@@ -333,6 +333,83 @@ describe("CurrencyInput", () => {
     });
   });
 
+  describe("Paste and mobile input sanitization", () => {
+    it("sanitizes pasted formatted currency string", () => {
+      render(
+        <CurrencyInput
+          value=""
+          onChange={mockOnChange}
+          asset={STELLAR_ASSETS.NGN}
+        />
+      );
+
+      const input = screen.getByRole("textbox");
+      fireEvent.change(input, { target: { value: "₦1,250,500.75" } });
+
+      expect(mockOnChange).toHaveBeenCalledWith("1250500.75");
+    });
+
+    it("ignores a second decimal point", () => {
+      render(
+        <CurrencyInput
+          value=""
+          onChange={mockOnChange}
+          asset={STELLAR_ASSETS.USDC}
+        />
+      );
+
+      const input = screen.getByRole("textbox");
+      fireEvent.change(input, { target: { value: "12.34.56" } });
+
+      expect(mockOnChange).toHaveBeenCalledWith("12.3456");
+    });
+
+    it("strips currency symbols and thousand separators from mobile input", () => {
+      render(
+        <CurrencyInput
+          value=""
+          onChange={mockOnChange}
+          asset={STELLAR_ASSETS.NGN}
+        />
+      );
+
+      const input = screen.getByRole("textbox");
+      fireEvent.change(input, { target: { value: "₦1,000" } });
+
+      expect(mockOnChange).toHaveBeenCalledWith("1000");
+    });
+
+    it("clamps fractional digits to asset decimals on paste", () => {
+      render(
+        <CurrencyInput
+          value=""
+          onChange={mockOnChange}
+          asset={STELLAR_ASSETS.USDC}
+        />
+      );
+
+      const input = screen.getByRole("textbox");
+      fireEvent.change(input, { target: { value: "1,234.5678" } });
+
+      expect(mockOnChange).toHaveBeenCalledWith("1234.56");
+    });
+
+    it("does not emit NaN for non-numeric pasted content", () => {
+      render(
+        <CurrencyInput
+          value=""
+          onChange={mockOnChange}
+          asset={STELLAR_ASSETS.XLM}
+        />
+      );
+
+      const input = screen.getByRole("textbox");
+      fireEvent.change(input, { target: { value: "abc" } });
+
+      expect(mockOnChange).not.toHaveBeenCalledWith("NaN");
+    });
+  });
+
   describe("Asset symbol badge", () => {
     it("displays asset symbol in badge", () => {
       render(

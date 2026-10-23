@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from "
 import {
   DEFAULT_LOCALE,
   intlLocale,
+  localeDirection,
   resolveLocale,
   setActiveLocale,
   SUPPORTED_LOCALES,
@@ -12,13 +13,22 @@ import {
 
 const STORAGE_KEY = "amana-locale";
 
+export function syncDocumentLocaleAttributes(locale: Locale): void {
+  if (typeof document === "undefined" || !document.documentElement) return;
+  document.documentElement.lang = intlLocale(locale);
+  document.documentElement.dir = localeDir(locale);
+  document.documentElement.setAttribute("data-locale", locale);
+}
+
 interface LocaleContextValue {
   locale: Locale;
+  dir: "ltr" | "rtl";
   setLocale: (locale: Locale) => void;
 }
 
 const LocaleContext = createContext<LocaleContextValue>({
   locale: DEFAULT_LOCALE,
+  dir: "ltr",
   setLocale: () => undefined,
 });
 
@@ -27,6 +37,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 
   function selectLocale(nextLocale: Locale) {
     setActiveLocale(nextLocale);
+    syncDocumentLocaleAttributes(nextLocale);
     setLocaleState(nextLocale);
   }
 
@@ -36,8 +47,10 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
       const storedLocale = window.localStorage.getItem(STORAGE_KEY);
       if (storedLocale && SUPPORTED_LOCALES.includes(storedLocale as Locale)) {
         restoreTimer = window.setTimeout(() => {
-          setActiveLocale(storedLocale as Locale);
-          setLocaleState(storedLocale as Locale);
+          const next = storedLocale as Locale;
+          setActiveLocale(next);
+          syncDocumentLocaleAttributes(next);
+          setLocaleState(next);
         }, 0);
       }
     } catch {
@@ -51,7 +64,9 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     setActiveLocale(locale);
-    document.documentElement.lang = intlLocale(locale);
+    const lang = intlLocale(locale);
+    document.documentElement.lang = lang;
+    document.documentElement.dir = localeDirection(locale);
     try {
       window.localStorage.setItem(STORAGE_KEY, locale);
     } catch {
@@ -60,7 +75,7 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
   }, [locale]);
 
   return (
-    <LocaleContext.Provider value={{ locale, setLocale: selectLocale }}>
+    <LocaleContext.Provider value={{ locale, dir: localeDir(locale), setLocale: selectLocale }}>
       {children}
     </LocaleContext.Provider>
   );

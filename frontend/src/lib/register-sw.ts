@@ -1,6 +1,15 @@
-export function registerServiceWorker() {
+export const SW_UPDATE_AVAILABLE_EVENT = "amana:sw-update-available";
+
+export function registerServiceWorker(onUpdateAvailable?: (waiting: ServiceWorker) => void) {
   if (typeof window === "undefined") return;
   if (!("serviceWorker" in navigator)) return;
+
+  const notifyWaiting = (worker: ServiceWorker) => {
+    onUpdateAvailable?.(worker);
+    window.dispatchEvent(
+      new CustomEvent(SW_UPDATE_AVAILABLE_EVENT, { detail: { waiting: worker } }),
+    );
+  };
 
   window.addEventListener("load", () => {
     navigator.serviceWorker
@@ -8,10 +17,8 @@ export function registerServiceWorker() {
       .then((registration) => {
         console.log("[SW] Service worker registered");
 
-        // Ensure the SW takes control of the page as soon as it is activated,
-        // so the page is controlled without requiring a full reload.
         if (registration.waiting) {
-          registration.waiting.postMessage({ type: "SKIP_WAITING" });
+          notifyWaiting(registration.waiting);
         }
 
         registration.addEventListener("updatefound", () => {
@@ -22,7 +29,7 @@ export function registerServiceWorker() {
               installing.state === "installed" &&
               navigator.serviceWorker.controller
             ) {
-              installing.postMessage({ type: "SKIP_WAITING" });
+              notifyWaiting(installing);
             }
           });
         });

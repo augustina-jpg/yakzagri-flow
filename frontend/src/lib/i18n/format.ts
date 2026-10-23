@@ -126,14 +126,31 @@ const RELATIVE_DIVISIONS: Array<{ amount: number; unit: Intl.RelativeTimeFormatU
   { amount: Number.POSITIVE_INFINITY, unit: "years" },
 ];
 
-/** `3 days ago` / `in 2 hours`. */
+export interface RelativeTimeOptions {
+  locale?: Locale;
+  now?: Date | string | number;
+  style?: Intl.RelativeTimeFormatStyle;
+  numeric?: Intl.RelativeTimeFormatNumeric;
+}
+
+/** `3 days ago` / `in 2 hours` using Intl.RelativeTimeFormat. */
 export function formatRelativeTime(
   value: Date | string | number,
-  options: { locale?: Locale; now?: Date } = {},
+  options: RelativeTimeOptions = {},
 ): string {
-  const { locale = resolveLocale(), now = new Date() } = options;
-  const rtf = new Intl.RelativeTimeFormat(intlLocale(locale), { numeric: "auto" });
-  let duration = (toDate(value).getTime() - now.getTime()) / 1000;
+  const {
+    locale = resolveLocale(),
+    now = new Date(),
+    style = "long",
+    numeric = "auto",
+  } = options;
+  const rtf = new Intl.RelativeTimeFormat(intlLocale(locale), { numeric, style });
+  const targetTime = toDate(value).getTime();
+  const baseTime = toDate(now).getTime();
+  let duration = (targetTime - baseTime) / 1000;
+  if (Math.abs(duration) < 1) {
+    return rtf.format(0, "seconds");
+  }
   for (const division of RELATIVE_DIVISIONS) {
     if (Math.abs(duration) < division.amount) {
       return rtf.format(Math.round(duration), division.unit);
@@ -141,4 +158,65 @@ export function formatRelativeTime(
     duration /= division.amount;
   }
   return rtf.format(Math.round(duration), "years");
+}
+
+export interface ApplicationCitationRecord {
+  id: string;
+  label: string;
+  url: string;
+  observedAt?: Date | string | number;
+}
+
+export interface RenderedCitation {
+  id: string;
+  label: string;
+  href: string;
+  relativeObservedAt?: string;
+}
+
+/**
+ * Render citations strictly from verified application data records.
+ * Never allows model output to invent or override source URLs.
+ */
+export function renderCitationsFromApplicationData(
+  requestedCitationIds: readonly string[],
+  applicationCatalog: ReadonlyMap<string, ApplicationCitationRecord> | readonly ApplicationCitationRecord[],
+  options: { locale?: Locale; now?: Date } = {},
+): RenderedCitation[] {
+  const lookupMap =
+    applicationCatalog instanceof Map
+      ? applicationCatalog
+      : new Map(
+          (applicationCatalog as readonly ApplicationCitationRecord[]).map((item) => [
+            item.id,
+            item,
+          ]),
+        );
+
+  const rendered: RenderedCitation[] = [];
+  const seen = new Set<string>();
+
+  for (const id of requestedCitationIds) {
+    if (seen.has(id)) continue;
+    const record = lookupMap.get(id);
+    if (!record) continue;
+    try {
+      const parsed = new URL(record.url);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") continue;
+      seen.add(id);
+      rendered.push({
+        id: record.id,
+        label: record.label,
+        href: parsed.toString(),
+        relativeObservedAt:
+          record.observedAt !== undefined
+            ? formatRelativeTime(record.observedAt, options)
+            : undefined,
+      });
+    } catch {
+      // Ignore malformed application URLs; never synthesize fallback URLs.
+    }
+  }
+
+  return rendered;
 }

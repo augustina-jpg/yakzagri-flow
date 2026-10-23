@@ -1,5 +1,5 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { axe, toHaveNoViolations } from "jest-axe";
 import { CurrencyInput } from "@/components/ui/CurrencyInput";
 import { VideoUploadCard } from "@/components/ui/VideoUploadCard";
@@ -71,6 +71,39 @@ describe("Money-action flows — axe WCAG 2.1 AA", () => {
       const dialog = await screen.findByRole("alertdialog");
       expect(await axe(dialog)).toHaveNoViolations();
     });
+
+    it("has no axe violations — default variant with cancel action", async () => {
+      render(
+        <ConfirmActionModal
+          open
+          onOpenChange={() => {}}
+          onConfirm={() => {}}
+          title="Confirm deposit"
+          message="Deposit 10,000 cNGN into escrow?"
+          confirmLabel="Confirm Deposit"
+          cancelLabel="Cancel"
+        />
+      );
+      const dialog = await screen.findByRole("alertdialog");
+      expect(await axe(dialog)).toHaveNoViolations();
+    });
+
+    it("has no axe violations — busy/loading confirm state", async () => {
+      render(
+        <ConfirmActionModal
+          open
+          onOpenChange={() => {}}
+          onConfirm={() => {}}
+          title="Confirm dispute resolution"
+          message="Resolve dispute in favour of the buyer?"
+          variant="danger"
+          confirmLabel="Resolve Dispute"
+          loading
+        />
+      );
+      const dialog = await screen.findByRole("alertdialog");
+      expect(await axe(dialog)).toHaveNoViolations();
+    });
   });
 
   describe("TradeListItem — keyboard accessible", () => {
@@ -93,6 +126,64 @@ describe("Money-action flows — axe WCAG 2.1 AA", () => {
       expect(viewButton.getAttribute("tabIndex")).not.toBe("-1");
       const depositBtn = container.querySelector('button[aria-label*="Deposit"]');
       expect(depositBtn).toBeTruthy();
+      expect(await axe(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations — disputed status row", async () => {
+      const { TradeListItem } = await import("@/components/trade/TradeListItem");
+      const { container } = render(
+        <TradeListItem
+          tradeId="t-2"
+          commodity="Soybean"
+          counterparty={{ role: "Seller", address: "GXYZ0987654321ABC" }}
+          amountCngn="5,000"
+          status="DISPUTED"
+          createdAt="2026-08-30"
+          onView={() => {}}
+        />
+      );
+      expect(await axe(container)).toHaveNoViolations();
+    });
+  });
+
+  describe("Vault stepper — interactive step states", () => {
+    it("has no axe violations — active step with progress indicator", async () => {
+      const { container } = render(
+        <div>
+          <ol aria-label="Vault deposit steps">
+            <li aria-current="step">
+              <span>Step 1: Choose amount</span>
+            </li>
+            <li>
+              <span>Step 2: Confirm deposit</span>
+            </li>
+            <li>
+              <span>Step 3: Review</span>
+            </li>
+          </ol>
+          <CurrencyInput value="100" onChange={() => {}} asset={mockAsset} label="Deposit amount" />
+        </div>
+      );
+      expect(await axe(container)).toHaveNoViolations();
+    });
+
+    it("has no axe violations — stepper error state", async () => {
+      const { container } = render(
+        <div>
+          <ol aria-label="Vault withdrawal steps">
+            <li aria-current="step">
+              <span>Step 1: Choose amount</span>
+            </li>
+          </ol>
+          <CurrencyInput
+            value=""
+            onChange={() => {}}
+            asset={mockAsset}
+            label="Withdrawal amount"
+            error="Amount exceeds available balance"
+          />
+        </div>
+      );
       expect(await axe(container)).toHaveNoViolations();
     });
   });

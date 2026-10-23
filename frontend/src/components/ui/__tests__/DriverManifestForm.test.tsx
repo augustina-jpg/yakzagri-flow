@@ -1,6 +1,11 @@
 import React from 'react';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { DriverManifestForm, normalizeNigerianPhone, validatePlate } from '../DriverManifestForm';
+import {
+    DriverManifestForm,
+    normalizePhoneNumber,
+    isValidPhoneNumber,
+    isValidLicensePlate,
+} from '../DriverManifestForm';
 
 // Mock the FormField component
 jest.mock('../FormField', () => ({
@@ -277,91 +282,88 @@ describe('DriverManifestForm Component', () => {
         expect(document.body.style.overflow).toBe('unset');
     });
 
-    describe('normalizeNigerianPhone', () => {
-        it.each([
-            ['070', '07031234567'],
-            ['080', '08031234567'],
-            ['081', '08131234567'],
-            ['090', '09031234567'],
-            ['091', '09131234567'],
-        ])('normalizes local %s prefix to E.164', (_prefix, local) => {
-            expect(normalizeNigerianPhone(local)).toBe(`+234${local.slice(1)}`);
-        });
-
-        it('normalizes local numbers with spaces and dashes', () => {
-            expect(normalizeNigerianPhone('0803 123 4567')).toBe('+2348031234567');
-            expect(normalizeNigerianPhone('0803-123-4567')).toBe('+2348031234567');
-        });
-
-        it('passes through already-E.164 numbers', () => {
-            expect(normalizeNigerianPhone('+2348031234567')).toBe('+2348031234567');
-            expect(normalizeNigerianPhone('+234 803 123 4567')).toBe('+2348031234567');
-        });
-
-        it('returns null for invalid numbers', () => {
-            expect(normalizeNigerianPhone('')).toBeNull();
-            expect(normalizeNigerianPhone('12345')).toBeNull();
-            expect(normalizeNigerianPhone('06031234567')).toBeNull();
-            expect(normalizeNigerianPhone('+15551234567')).toBeNull();
-        });
-    });
-
-    describe('validatePlate', () => {
-        it('accepts valid plate formats', () => {
-            expect(validatePlate('ABC 123')).toBeNull();
-            expect(validatePlate('GEG 1123 H')).toBeNull();
-            expect(validatePlate('ABC-123-XY')).toBeNull();
-        });
-
-        it('rejects empty or whitespace-only plates', () => {
-            expect(validatePlate('')).not.toBeNull();
-            expect(validatePlate('   ')).not.toBeNull();
-        });
-
-        it('rejects malformed plates', () => {
-            expect(validatePlate('A')).not.toBeNull();
-            expect(validatePlate('!!!')).not.toBeNull();
-        });
-    });
-
-    describe('phone normalization and validation in the form', () => {
-        it('normalizes a local phone number on submit', () => {
+    describe('Nigerian phone normalization and plate validation', () => {
+        it('normalizes local Nigerian numbers starting with 070, 080, 081, 090, 091 to +234 on submit', () => {
             const onComplete = jest.fn();
             const { container } = render(<DriverManifestForm {...defaultProps} onComplete={onComplete} />);
 
-            fireEvent.change(screen.getByPlaceholderText('e.g. Amina Khalid'), { target: { value: 'John Doe' } });
-            fireEvent.change(screen.getByPlaceholderText('e.g. +234 803 000 0000'), { target: { value: '08031234567' } });
-            fireEvent.change(screen.getByPlaceholderText('e.g. GEG 1123 H'), { target: { value: 'ABC 123' } });
+            const driverNameInput = screen.getByPlaceholderText('e.g. Amina Khalid');
+            const driverPhoneInput = screen.getByPlaceholderText('e.g. +234 803 000 0000');
+            const licensePlateInput = screen.getByPlaceholderText('e.g. GEG 1123 H');
 
-            fireEvent.submit(container.querySelector('form')!);
+            fireEvent.change(driverNameInput, { target: { value: 'Amina Khalid' } });
+            fireEvent.change(driverPhoneInput, { target: { value: '08031234567' } });
+            fireEvent.change(licensePlateInput, { target: { value: 'GEG 1123 H' } });
+
+            const form = container.querySelector('form')!;
+            fireEvent.submit(form);
 
             expect(onComplete).toHaveBeenCalledWith({
-                driverName: 'John Doe',
+                driverName: 'Amina Khalid',
                 driverPhone: '+2348031234567',
-                licensePlate: 'ABC 123',
+                licensePlate: 'GEG 1123 H',
             });
         });
 
-        it('shows an inline error for an invalid phone number and keeps submit disabled', () => {
+        it('normalizes local phone numbers on blur', () => {
             render(<DriverManifestForm {...defaultProps} />);
 
-            fireEvent.change(screen.getByPlaceholderText('e.g. Amina Khalid'), { target: { value: 'John Doe' } });
-            fireEvent.change(screen.getByPlaceholderText('e.g. +234 803 000 0000'), { target: { value: '12345' } });
-            fireEvent.change(screen.getByPlaceholderText('e.g. GEG 1123 H'), { target: { value: 'ABC 123' } });
+            const driverPhoneInput = screen.getByPlaceholderText('e.g. +234 803 000 0000');
+            fireEvent.change(driverPhoneInput, { target: { value: '09012345678' } });
+            fireEvent.blur(driverPhoneInput);
 
-            expect(screen.getByTestId('error-driverPhone')).toBeInTheDocument();
-            expect(screen.getByText('Submit Manifest')).toBeDisabled();
+            expect(driverPhoneInput).toHaveValue('+2349012345678');
         });
 
-        it('shows an inline error for an empty license plate', () => {
+        it('displays inline field error for invalid phone number', () => {
             render(<DriverManifestForm {...defaultProps} />);
 
-            fireEvent.change(screen.getByPlaceholderText('e.g. Amina Khalid'), { target: { value: 'John Doe' } });
-            fireEvent.change(screen.getByPlaceholderText('e.g. +234 803 000 0000'), { target: { value: '+2348030000000' } });
-            fireEvent.change(screen.getByPlaceholderText('e.g. GEG 1123 H'), { target: { value: '   ' } });
+            const driverPhoneInput = screen.getByPlaceholderText('e.g. +234 803 000 0000');
+            fireEvent.change(driverPhoneInput, { target: { value: '12345' } });
+            fireEvent.blur(driverPhoneInput);
 
-            expect(screen.getByTestId('error-licensePlate')).toBeInTheDocument();
-            expect(screen.getByText('Submit Manifest')).toBeDisabled();
+            const phoneError = screen.getByTestId('error-driver-phone');
+            expect(phoneError).toBeInTheDocument();
+            expect(phoneError).toHaveTextContent(/Please enter a valid Nigerian or E\.164 phone number/i);
+        });
+
+        it('displays inline field error when vehicle plate is empty or invalid', () => {
+            render(<DriverManifestForm {...defaultProps} />);
+
+            const licensePlateInput = screen.getByPlaceholderText('e.g. GEG 1123 H');
+            fireEvent.change(licensePlateInput, { target: { value: '' } });
+            fireEvent.blur(licensePlateInput);
+
+            const plateError = screen.getByTestId('error-license-plate');
+            expect(plateError).toBeInTheDocument();
+            expect(plateError).toHaveTextContent(/Vehicle license plate is required/i);
+
+            fireEvent.change(licensePlateInput, { target: { value: '!!!invalid!!!' } });
+            expect(screen.getByTestId('error-license-plate')).toHaveTextContent(/Please enter a valid license plate/i);
+        });
+
+        it('normalizePhoneNumber helper handles regional prefixes correctly', () => {
+            expect(normalizePhoneNumber('07012345678')).toBe('+2347012345678');
+            expect(normalizePhoneNumber('08023456789')).toBe('+2348023456789');
+            expect(normalizePhoneNumber('08134567890')).toBe('+2348134567890');
+            expect(normalizePhoneNumber('09045678901')).toBe('+2349045678901');
+            expect(normalizePhoneNumber('09156789012')).toBe('+2349156789012');
+            expect(normalizePhoneNumber('+2348030000000')).toBe('+2348030000000');
+        });
+
+        it('isValidPhoneNumber validates E.164 and Nigerian numbers', () => {
+            expect(isValidPhoneNumber('08031234567')).toBe(true);
+            expect(isValidPhoneNumber('+2348031234567')).toBe(true);
+            expect(isValidPhoneNumber('12345')).toBe(false);
+            expect(isValidPhoneNumber('')).toBe(false);
+        });
+
+        it('isValidLicensePlate accepts valid formats and rejects invalid ones', () => {
+            expect(isValidLicensePlate('GEG 1123 H')).toBe(true);
+            expect(isValidLicensePlate('ABC 123')).toBe(true);
+            expect(isValidLicensePlate('KJA-456-AA')).toBe(true);
+            expect(isValidLicensePlate('')).toBe(false);
+            expect(isValidLicensePlate('123')).toBe(false);
         });
     });
 });

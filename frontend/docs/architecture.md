@@ -102,3 +102,97 @@ consistent across the app.
 2. The action calls `requestWithResult`.
 3. On failure it receives an `ApiError` and passes it to `errorHandler`.
 4. The resulting message is stored in `uiStore` (e.g. a toast) and rendered.
+
+## Proof-of-Delivery (PoD) & Dispute flow
+
+This section documents the end-to-end Proof-of-Delivery lifecycle: the driver
+uploads a delivery video, the backend pins it to IPFS, the driver attests to the
+delivery, and — if the recipient disputes it — a mediator settles the dispute.
+See `frontend/MEDIATOR_RESOLUTION_PROOF.md` for the mediator-facing resolution
+proof details.
+
+### Actors
+
+| Actor | Role |
+| --- | --- |
+| Driver | Records/uploads the delivery video and signs the attestation. |
+| Recipient | Confirms receipt or opens a dispute. |
+| Backend | Validates uploads, pins to IPFS, stores the CID and attestation. |
+| IPFS | Content-addressed storage for the delivery video (referenced by CID). |
+| Mediator | Reviews evidence and settles an open dispute. |
+
+### End-to-end sequence
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant D as Driver
+    participant FE as Frontend
+    participant BE as Backend
+    participant IPFS as IPFS
+    participant R as Recipient
+    participant M as Mediator
+
+    D->>FE: Record delivery video
+    FE->>BE: POST /deliveries/:id/proof (video)
+    BE->>IPFS: Pin video
+    IPFS-->>BE: CID
+    BE-->>FE: { cid, status: "pinned" }
+    D->>FE: Sign attestation (cid)
+    FE->>BE: POST /deliveries/:id/attestation
+    BE-->>FE: { status: "attested" }
+    R->>FE: Confirm receipt
+    alt Recipient confirms
+        FE->>BE: POST /deliveries/:id/confirm
+        BE-->>FE: { status: "delivered" }
+    else Recipient disputes
+        FE->>BE: POST /deliveries/:id/dispute
+        BE-->>FE: { status: "disputed" }
+        M->>FE: Open dispute review
+        FE->>BE: GET /disputes/:id (evidence + cid)
+        BE-->>FE: { cid, attestation, timeline }
+        M->>FE: Submit resolution
+        FE->>BE: POST /disputes/:id/resolve
+        BE-->>FE: { status: "resolved" }
+    end
+```
+
+### State lifecycle
+
+A delivery moves through the following states. Each transition is triggered by
+the action shown; invalid transitions are rejected by the backend and surfaced
+through `errorHandler`.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Recording
+    Recording --> Uploading: video captured
+    Uploading --> Pinned: IPFS pin succeeds
+    Uploading --> Failed: upload/pin error
+    Failed --> Uploading: retry
+    Pinned --> Attested: driver signs attestation
+    Attested --> Delivered: recipient confirms
+    Attested --> Disputed: recipient disputes
+    Disputed --> Resolved: mediator settles
+    Delivered --> [*]
+    Resolved --> [*]
+```
+
+| State | Meaning | Allowed next states |
+| --- | --- | --- |
+| `Recording` | Driver is capturing the delivery video. | `Uploading` |
+| `Uploading` | Video is being uploaded and pinned to IPFS. | `Pinned`, `Failed` |
+| `Failed` | Upload or pin failed; retryable. | `Uploading` |
+| `Pinned` | Video stored on IPFS; CID recorded. | `Attested` |
+| `Attested` | Driver signed the attestation over the CID. | `Delivered`, `Disputed` |
+| `Delivered` | Recipient confirmed receipt. Terminal. | — |
+| `Disputed` | Recipient opened a dispute. | `Resolved` |
+| `Resolved` | Mediator settled the dispute. Terminal. | — |
+
+### Dispute resolution notes
+
+- Evidence for a dispute is the pinned video CID plus the driver attestation;
+  the mediator UI fetches both via `GET /disputes/:id`.
+- Resolution is final: once `Resolved`, the delivery cannot transition again.
+- All network calls follow the store → `requestWithResult` → `errorHandler`
+  pattern described above, so failures render consistent messages.

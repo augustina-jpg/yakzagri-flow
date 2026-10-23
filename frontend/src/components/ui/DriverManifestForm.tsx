@@ -14,56 +14,34 @@ export interface DriverManifestData {
   licensePlate: string;
 }
 
-const NIGERIAN_E164_PATTERN = /^\+234\d{10}$/;
-const PLATE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 -]{1,12}[A-Za-z0-9]$/;
-
 /**
- * Normalize a Nigerian phone number to E.164 format (`+234XXXXXXXXXX`).
- * Returns null when the input cannot be resolved to a valid number.
+ * Normalizes phone numbers to E.164.
+ * Local Nigerian numbers (070..., 080..., 081..., 090..., 091...) automatically normalize to +234...
  */
-export function normalizeNigerianPhone(raw: string): string | null {
-  if (typeof raw !== "string") {
-    return null;
+export function normalizePhoneNumber(raw: string): string {
+  const clean = raw.trim().replace(/[\s\-()]/g, "");
+  if (/^0(70|80|81|90|91)\d{8}$/.test(clean)) {
+    return `+234${clean.slice(1)}`;
   }
-
-  const cleaned = raw.replace(/[\s\-().]/g, "");
-  if (cleaned === "") {
-    return null;
+  if (/^\+2340(70|80|81|90|91)\d{8}$/.test(clean)) {
+    return `+234${clean.slice(5)}`;
   }
-
-  let digits: string;
-
-  if (cleaned.startsWith("+234")) {
-    digits = cleaned.slice(4);
-  } else if (cleaned.startsWith("234")) {
-    digits = cleaned.slice(3);
-  } else if (cleaned.startsWith("0")) {
-    digits = cleaned.slice(1);
-  } else {
-    return null;
+  if (/^234(70|80|81|90|91)\d{8}$/.test(clean)) {
+    return `+${clean}`;
   }
-
-  if (!/^\d{10}$/.test(digits)) {
-    return null;
-  }
-
-  const normalized = `+234${digits}`;
-  return NIGERIAN_E164_PATTERN.test(normalized) ? normalized : null;
+  return clean;
 }
 
-/**
- * Validate a vehicle registration plate.
- * Returns an error message when invalid, or null when valid.
- */
-export function validatePlate(raw: string): string | null {
-  const trimmed = typeof raw === "string" ? raw.trim() : "";
-  if (trimmed === "") {
-    return "License plate is required";
-  }
-  if (!PLATE_PATTERN.test(trimmed)) {
-    return "Enter a valid license plate (2-14 letters, numbers, spaces or dashes)";
-  }
-  return null;
+export function isValidPhoneNumber(raw: string): boolean {
+  if (!raw || !raw.trim()) return false;
+  const normalized = normalizePhoneNumber(raw);
+  return /^\+[1-9]\d{7,14}$/.test(normalized);
+}
+
+export function isValidLicensePlate(raw: string): boolean {
+  const trimmed = raw.trim().toUpperCase();
+  if (!trimmed) return false;
+  return /^[A-Z]{2,3}[-\s]?[0-9]{2,4}(?:[-\s]?[A-Z]{1,2})?$/.test(trimmed);
 }
 
 interface DriverManifestFormProps {
@@ -77,28 +55,26 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
   const [licensePlate, setLicensePlate] = useState("");
-  const [phoneTouched, setPhoneTouched] = useState(false);
-  const [plateTouched, setPlateTouched] = useState(false);
-  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [touched, setTouched] = useState<{ phone?: boolean; plate?: boolean }>({});
 
-  const phoneError = useMemo(() => {
-    if (driverPhone.trim() === "") {
-      return "Driver phone is required";
-    }
-    return normalizeNigerianPhone(driverPhone) === null
-      ? "Enter a valid Nigerian phone number (e.g. 0803 000 0000)"
-      : null;
-  }, [driverPhone]);
+  const isPhoneValid = isValidPhoneNumber(driverPhone);
+  const isPlateValid = isValidLicensePlate(licensePlate);
 
-  const plateError = useMemo(() => validatePlate(licensePlate), [licensePlate]);
+  const phoneError =
+    (touched.phone && !driverPhone.trim())
+      ? "Driver phone is required"
+      : (touched.phone || driverPhone.trim().length > 0) && !isPhoneValid
+        ? "Please enter a valid Nigerian or E.164 phone number (e.g. 0803... or +234...)"
+        : undefined;
 
-  const showPhoneError = (phoneTouched || submitAttempted) && phoneError !== null;
-  const showPlateError = (plateTouched || submitAttempted) && plateError !== null;
+  const plateError =
+    touched.plate && !licensePlate.trim()
+      ? "Vehicle license plate is required"
+      : (touched.plate || licensePlate.trim().length > 0) && !isPlateValid
+        ? "Please enter a valid license plate (e.g. GEG 1123 H)"
+        : undefined;
 
-  const submitEnabled =
-    driverName.trim() !== '' &&
-    phoneError === null &&
-    plateError === null;
+  const submitEnabled = driverName.trim() !== "" && isPhoneValid && isPlateValid;
 
   useEffect(() => {
     const bodyOverflow = document.body.style.overflow;
@@ -112,15 +88,6 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
     };
   }, [isOpen]);
 
-
-  const handlePhoneBlur = () => {
-    setPhoneTouched(true);
-    const normalized = normalizeNigerianPhone(driverPhone);
-    if (normalized !== null) {
-      setDriverPhone(normalized);
-    }
-  };
-
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSubmitAttempted(true);
@@ -130,10 +97,9 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
       return;
     }
 
-    const normalizedPhone = normalizeNigerianPhone(driverPhone);
-    const plateValidationError = validatePlate(licensePlate);
-
-    if (normalizedPhone === null || plateValidationError !== null) {
+    const normalizedPhone = normalizePhoneNumber(driverPhone);
+    if (!driverName.trim() || !isValidPhoneNumber(normalizedPhone) || !isValidLicensePlate(licensePlate)) {
+      setTouched({ phone: true, plate: true });
       return;
     }
 
@@ -146,9 +112,7 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
     setDriverName("");
     setDriverPhone("");
     setLicensePlate("");
-    setPhoneTouched(false);
-    setPlateTouched(false);
-    setSubmitAttempted(false);
+    setTouched({});
 
     onDismiss?.();
   };
@@ -194,8 +158,8 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
               <FormField
                 label="Driver Phone"
                 name="driver-phone"
-                hint="Local numbers (0803...) are converted to +234 automatically"
-                error={showPhoneError ? phoneError ?? undefined : undefined}
+                hint="Include country code for best routing"
+                error={phoneError}
                 required
               >
                 <input
@@ -204,26 +168,28 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
                   className="w-full rounded-xl border border-border-default bg-bg-input px-4 py-2 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/30"
                   value={driverPhone}
                   onChange={(event) => setDriverPhone(event.target.value)}
-                  onBlur={handlePhoneBlur}
+                  onBlur={() => {
+                    setTouched((prev) => ({ ...prev, phone: true }));
+                    if (driverPhone.trim()) {
+                      const normalized = normalizePhoneNumber(driverPhone);
+                      if (normalized !== driverPhone.trim()) {
+                        setDriverPhone(normalized);
+                      }
+                    }
+                  }}
                   placeholder={translateCopy("ui.e_g_234_803_000_0000_a54ac33")}
-                  aria-invalid={showPhoneError}
                   required
                 />
               </FormField>
 
-              <FormField
-                label="License Plate"
-                name="license-plate"
-                error={showPlateError ? plateError ?? undefined : undefined}
-                required
-              >
+              <FormField label="License Plate" name="license-plate" error={plateError} required>
                 <input
                   type="text"
                   name="license-plate"
                   className="w-full rounded-xl border border-border-default bg-bg-input px-4 py-2 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/30"
                   value={licensePlate}
                   onChange={(event) => setLicensePlate(event.target.value)}
-                  onBlur={() => setPlateTouched(true)}
+                  onBlur={() => setTouched((prev) => ({ ...prev, plate: true }))}
                   placeholder={translateCopy("ui.e_g_geg_1123_h_814141c")}
                   aria-invalid={showPlateError}
                   required
