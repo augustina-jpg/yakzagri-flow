@@ -1,4 +1,5 @@
 import { validateStep1, validateStep2, step1Schema, step2Schema } from "../app/trades/create/validation";
+import { COMMODITY_UNITS } from "../lib/domain-schemas/trade";
 
 describe("Create Trade Validation", () => {
   describe("step1Schema", () => {
@@ -64,6 +65,47 @@ describe("Create Trade Validation", () => {
       };
       const result = step1Schema.safeParse(data);
       expect(result.success).toBe(true);
+    });
+
+    it("accepts every supported commodity unit", () => {
+      for (const unit of COMMODITY_UNITS) {
+        const data = {
+          commodity: "Maize",
+          quantity: "500",
+          unit,
+          pricePerUnit: "450",
+          currency: "NGN",
+          sellerAddress: "GDNM7WSJ7VIUVK2TSZ2OQES5XR2663TZEIBFXRDT56B5IRLHERVWSXMU",
+        };
+        const result = step1Schema.safeParse(data);
+        expect(result.success).toBe(true);
+      }
+    });
+
+    it("rejects unknown commodity unit", () => {
+      const data = {
+        commodity: "Maize",
+        quantity: "500",
+        unit: "barrels",
+        pricePerUnit: "450",
+        currency: "NGN",
+        sellerAddress: "GDNM7WSJ7VIUVK2TSZ2OQES5XR2663TZEIBFXRDT56B5IRLHERVWSXMU",
+      };
+      const result = step1Schema.safeParse(data);
+      expect(result.success).toBe(false);
+    });
+
+    it("rejects missing quantity", () => {
+      const data = {
+        commodity: "Maize",
+        quantity: "",
+        unit: "kg",
+        pricePerUnit: "450",
+        currency: "NGN",
+        sellerAddress: "GDNM7WSJ7VIUVK2TSZ2OQES5XR2663TZEIBFXRDT56B5IRLHERVWSXMU",
+      };
+      const result = step1Schema.safeParse(data);
+      expect(result.success).toBe(false);
     });
 
     it("rejects self-escrow when buyerAddress and sellerAddress match", () => {
@@ -143,6 +185,18 @@ describe("Create Trade Validation", () => {
         sellerAddress: "invalid",
       });
       expect(Object.keys(errors).length).toBeGreaterThan(0);
+    });
+
+    it("returns a unit error for an unknown unit", () => {
+      const errors = validateStep1({
+        commodity: "Maize",
+        quantity: "500",
+        unit: "barrels",
+        pricePerUnit: "450",
+        currency: "NGN",
+        sellerAddress: "GDNM7WSJ7VIUVK2TSZ2OQES5XR2663TZEIBFXRDT56B5IRLHERVWSXMU",
+      });
+      expect(errors.unit).toBeDefined();
     });
   });
 

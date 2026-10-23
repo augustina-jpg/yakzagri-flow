@@ -218,12 +218,76 @@ function AuthRequired({ onConnect, onAuthenticate, isConnected, isLoading }: {
   );
 }
 
+export interface EvidenceAttachmentVerification {
+  cid: string;
+  previewUrl: string;
+  recordedAt: string;
+  verifiedTimestamp: boolean;
+  verificationReason: string;
+}
+
+export function extractAndVerifyEvidenceAttachments(
+  events: TradeHistoryEvent[],
+  tradeCreatedAt?: string,
+): EvidenceAttachmentVerification[] {
+  const createdMs = tradeCreatedAt ? Date.parse(tradeCreatedAt) : NaN;
+  const nowMs = Date.now() + 5 * 60 * 1000;
+  const results: EvidenceAttachmentVerification[] = [];
+
+  for (const event of events) {
+    const meta = event.metadata ?? {};
+    const rawCid =
+      typeof meta.cid === "string"
+        ? meta.cid
+        : typeof meta.evidenceCid === "string"
+          ? meta.evidenceCid
+          : null;
+    if (!rawCid) continue;
+    const eventMs = Date.parse(event.timestamp);
+    const isValidDate = Number.isFinite(eventMs);
+    const afterCreation = !Number.isFinite(createdMs) || eventMs >= createdMs;
+    const notFuture = isValidDate && eventMs <= nowMs;
+    const verifiedTimestamp = isValidDate && afterCreation && notFuture;
+
+    results.push({
+      cid: rawCid,
+      previewUrl: `https://gateway.pinata.cloud/ipfs/${encodeURIComponent(rawCid)}`,
+      recordedAt: event.timestamp,
+      verifiedTimestamp,
+      verificationReason: verifiedTimestamp
+        ? "Timestamp verified against trade lifecycle ledger"
+        : "Timestamp outside expected trade lifecycle window",
+    });
+  }
+
+  return results;
+}
+
+/**
+ * Keep execution and authorization strictly outside model output.
+ * Transaction signing and state-changing actions require an authenticated
+ * wallet session and explicit user-initiated action scope.
+ */
+export function assertDeterministicExecutionAuthorized(params: {
+  token: string | null | undefined;
+  walletAddress: string | null | undefined;
+  fromModelOutput?: boolean;
+}): void {
+  if (params.fromModelOutput) {
+    throw new Error("Execution and authorization cannot be triggered from model output.");
+  }
+  if (!params.token || !params.walletAddress) {
+    throw new Error("Sign in with your wallet to perform this action.");
+  }
+}
+
 export default function TradeDetailPage() {
   const params = useParams();
   const tradeId = params.id as string;
   const { token, address, isAuthenticated, isWalletConnected, isLoading: authLoading, connectWallet, authenticate } = useAuth();
 
   const [trade, setTrade] = useState<TradeDetail | null>(null);
+  const [evidenceItems, setEvidenceItems] = useState<EvidenceAttachmentVerification[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -244,6 +308,9 @@ export default function TradeDetailPage() {
 
       const tradeDetail = buildTradeDetail(tradeData, historyData.events);
       setTrade(tradeDetail);
+      setEvidenceItems(
+        extractAndVerifyEvidenceAttachments(historyData.events, tradeData.createdAt),
+      );
     } catch (err) {
       if (err instanceof ApiError) {
         if (err.status === 404) {
@@ -266,12 +333,16 @@ export default function TradeDetailPage() {
     scopeKey: string,
     action: (options: { idempotencyKey?: string }) => Promise<{ unsignedXdr: string }>,
   ) {
-    if (!token) {
-      setActionError("Sign in with your wallet to perform this action.");
+    try {
+      assertDeterministicExecutionAuthorized({ token, walletAddress: address });
+    } catch (authErr) {
+      setActionError(
+        authErr instanceof Error
+          ? authErr.message
+          : "Sign in with your wallet to perform this action.",
+      );
       return;
     }
-
-    const scopeKey = `trade:${tradeId}:asset-action`;
 
     setActionLoading(true);
     setActionError(null);
@@ -323,14 +394,16 @@ export default function TradeDetailPage() {
   function handleConfirmDelivery() {
     void runSignedAction(
       "Delivery confirmation",
-      () => api.trades.confirmDelivery(token!, tradeId),
+      `trade:${tradeId}:confirm-delivery`,
+      (opts) => api.trades.confirmDelivery(token!, tradeId, opts),
     );
   }
 
   function handleReleaseFunds() {
     void runSignedAction(
       "Funds release",
-      () => api.trades.releaseFunds(token!, tradeId),
+      `trade:${tradeId}:release-funds`,
+      (opts) => api.trades.releaseFunds(token!, tradeId, opts),
     );
   }
 
@@ -387,14 +460,63 @@ export default function TradeDetailPage() {
   const isInTransit = trade.status === "IN TRANSIT";
 
   return (
-    <TradeDetailPanel
-      trade={trade}
-      onConfirmDelivery={isBuyer && isInTransit ? handleConfirmDelivery : undefined}
-      onRaiseDispute={(isBuyer || isSeller) && isInTransit ? handleRaiseDispute : undefined}
-      onReleaseFunds={isSeller && isInTransit ? handleReleaseFunds : undefined}
-      actionLoading={actionLoading}
-      actionError={actionError}
-      actionSuccess={actionSuccess}
-    />
+    <div>
+      <TradeDetailPanel
+        trade={trade}
+        onConfirmDelivery={isBuyer && isInTransit ? handleConfirmDelivery : undefined}
+        onRaiseDispute={(isBuyer || isSeller) && isInTransit ? handleRaiseDispute : undefined}
+        onReleaseFunds={isSeller && isInTransit ? handleReleaseFunds : undefined}
+        actionLoading={actionLoading}
+        actionError={actionError}
+        actionSuccess={actionSuccess}
+      />
+      {evidenceItems.length > 0 && (
+        <section
+          aria-label="Evidence Attachments"
+          data-testid="evidence-attachments-section"
+          className="max-w-6xl mx-auto px-6 pb-8"
+        >
+          <h2 className="text-lg font-semibold text-text-primary mb-3">
+            Evidence Attachments & Timestamp Verification
+          </h2>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {evidenceItems.map((item) => (
+              <div
+                key={`${item.cid}-${item.recordedAt}`}
+                data-testid={`evidence-preview-${item.cid}`}
+                className="rounded-lg border border-border-default bg-card p-4 flex flex-col gap-2"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-mono text-xs text-text-primary truncate">
+                    CID: {item.cid}
+                  </span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${
+                      item.verifiedTimestamp
+                        ? "bg-status-success/15 text-status-success"
+                        : "bg-status-warning/15 text-status-warning"
+                    }`}
+                  >
+                    {item.verifiedTimestamp ? "Timestamp Verified" : "Unverified Timestamp"}
+                  </span>
+                </div>
+                <p className="text-xs text-text-secondary">{item.verificationReason}</p>
+                <div className="flex items-center justify-between text-xs text-text-muted">
+                  <span>Recorded: {formatDate(item.recordedAt)}</span>
+                  <a
+                    href={item.previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-gold hover:underline font-medium"
+                  >
+                    Preview Attachment
+                  </a>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
   );
 }

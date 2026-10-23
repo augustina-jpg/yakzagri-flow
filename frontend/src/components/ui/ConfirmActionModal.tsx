@@ -106,7 +106,7 @@ export function ConfirmActionModal({
             aria-busy={loading}
             data-testid="confirm-action-button"
             className={[
-              "px-4 py-2 text-sm font-semibold rounded-md",
+              "inline-flex items-center justify-center min-h-[44px] px-4 py-2 text-sm font-semibold rounded-md",
               "transition-opacity",
               "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2",
               "disabled:opacity-60 disabled:cursor-not-allowed",

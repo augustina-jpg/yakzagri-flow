@@ -6,9 +6,33 @@ export const TRADE_STATUSES = [
   "SETTLED",
   "DISPUTED",
   "DRAFT",
+  "CANCELLED",
 ] as const;
 
 export type TradeStatus = (typeof TRADE_STATUSES)[number];
+
+/**
+ * Pre-dispatch escrow states in which a trade may still be cancelled by an
+ * authorized party (buyer or seller) before goods are dispatched. Escrow
+ * funds are still locked in the vault in these states, so cancellation
+ * returns them to the buyer.
+ */
+export const CANCELLABLE_TRADE_STATUSES = ["PENDING"] as const;
+
+export type CancellableTradeStatus = (typeof CANCELLABLE_TRADE_STATUSES)[number];
+
+/**
+ * Runtime guard for the cancellable pre-dispatch states. Use this to gate
+ * the "Cancel Trade" action on the trade detail page.
+ */
+export function isCancellableTradeStatus(
+  status: unknown,
+): status is CancellableTradeStatus {
+  return (
+    typeof status === "string" &&
+    (CANCELLABLE_TRADE_STATUSES as readonly string[]).includes(status)
+  );
+}
 
 /**
  * Runtime guard that narrows an arbitrary value to the canonical

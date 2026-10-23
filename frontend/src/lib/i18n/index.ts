@@ -52,9 +52,56 @@ function lookup(catalog: Catalog, key: string): string | undefined {
     | undefined;
 }
 
+/**
+ * Redacts raw user prompts, Stellar secret keys, JWT tokens, and long free-form
+ * inputs so diagnostic logs never leak sensitive prompt material.
+ */
+export function sanitizeDiagnosticMeta(input: string): string {
+  if (!input) return "";
+  const redactedSecrets = input
+    .replace(/\bS[A-Z2-7]{55}\b/g, "[REDACTED_STELLAR_SECRET]")
+    .replace(/eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, "[REDACTED_TOKEN]");
+  if (redactedSecrets.length > 64 || /\s/.test(redactedSecrets)) {
+    return "[REDACTED_PROMPT]";
+  }
+  return redactedSecrets;
+}
+
+function resolveIcuPlurals(template: string, params?: Record<string, string | number>): string {
+  if (!params || !template.includes("plural")) return template;
+  return template.replace(
+    /\{(\w+),\s*plural,\s*((?:(?:zero|one|two|few|many|other|=\d+)\s*\{[^{}]*\}\s*)+)\}/g,
+    (match, varName: string, body: string) => {
+      const rawVal = params[varName];
+      const count = typeof rawVal === "number" ? rawVal : Number(rawVal);
+      if (!Number.isFinite(count)) return match;
+
+      const branches: Record<string, string> = {};
+      const branchRegex = /(zero|one|two|few|many|other|=\d+)\s*\{([^{}]*)\}/g;
+      let branchMatch: RegExpExecArray | null;
+      while ((branchMatch = branchRegex.exec(body)) !== null) {
+        branches[branchMatch[1]] = branchMatch[2];
+      }
+
+      const exactKey = `=${count}`;
+      let chosen = branches[exactKey];
+      if (chosen === undefined && count === 0 && "zero" in branches) {
+        chosen = branches.zero;
+      }
+      if (chosen === undefined) {
+        const category = count === 1 ? "one" : "other";
+        chosen = branches[category] ?? branches.other ?? "";
+      }
+
+      return chosen.replace(/#/g, String(count));
+    },
+  );
+}
+
 function interpolate(template: string, params?: Record<string, string | number>): string {
   if (!params) return template;
-  return template.replace(/\{(\w+)\}/g, (match, name) =>
+  const withPlurals = resolveIcuPlurals(template, params);
+  return withPlurals.replace(/\{(\w+)\}/g, (match, name) =>
     name in params ? String(params[name]) : match,
   );
 }
@@ -81,7 +128,7 @@ export function t(
   const raw = lookup(catalog, key) ?? lookup(en, key);
   if (raw === undefined) {
     if (process.env.NODE_ENV !== "production") {
-      console.warn(`[i18n] missing message key: ${key}`);
+      console.warn(`[i18n] missing message key: ${sanitizeDiagnosticMeta(String(key))}`);
     }
     return key;
   }

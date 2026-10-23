@@ -24,14 +24,14 @@ export function BentoCard({
   return (
     <div
       className={[
-        "bg-[#101E18F2]",
+        "bg-surface-card",
         "dark:bg-surface-1",
         "border border-border-default",
         "dark:border-border-default",
         "rounded-2xl",
         "p-6",
-        "shadow-card",
-        "hover:shadow-card-hover",
+        "shadow-elev-1",
+        "hover:shadow-elev-2",
         "transition-shadow duration-300",
         "relative",
         "overflow-hidden",

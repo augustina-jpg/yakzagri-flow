@@ -11,7 +11,7 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { createElement, Fragment } from "react";
 import { LocaleProvider, useLocale } from "@/lib/i18n/LocaleProvider";
-import { setActiveLocale } from "@/lib/i18n/config";
+import { setActiveLocale, localeDirection } from "@/lib/i18n/config";
 
 function LocaleProbe() {
   const { locale, setLocale } = useLocale();
@@ -120,6 +120,7 @@ describe("t()", () => {
       expect(screen.getByText("ha-NG")).toBeInTheDocument();
       expect(screen.getByText("Sake gwadawa")).toBeInTheDocument();
       expect(document.documentElement.lang).toBe("ha-NG");
+      expect(document.documentElement.dir).toBe("ltr");
       expect(window.localStorage.getItem("amana-locale")).toBe("ha-NG");
     });
   });
@@ -132,7 +133,26 @@ describe("t()", () => {
       expect(screen.getByText("yo-NG")).toBeInTheDocument();
       expect(screen.getByText("Gbìyànjú lẹ́ẹ̀kansi")).toBeInTheDocument();
       expect(document.documentElement.lang).toBe("yo-NG");
+      expect(document.documentElement.dir).toBe("ltr");
     });
+  });
+});
+
+describe("localeDirection", () => {
+  it("defaults to ltr for Nigerian and Western locales", () => {
+    expect(localeDirection("en-NG")).toBe("ltr");
+    expect(localeDirection("en-US")).toBe("ltr");
+    expect(localeDirection("ha-NG")).toBe("ltr");
+    expect(localeDirection("yo-NG")).toBe("ltr");
+    expect(localeDirection("ig-NG")).toBe("ltr");
+    expect(localeDirection("pseudo")).toBe("ltr");
+  });
+
+  it("returns rtl for right-to-left locales or Arabic script variants", () => {
+    expect(localeDirection("ar")).toBe("rtl");
+    expect(localeDirection("ha-Arab")).toBe("rtl");
+    expect(localeDirection("he")).toBe("rtl");
+    expect(localeDirection("ur")).toBe("rtl");
   });
 });
 

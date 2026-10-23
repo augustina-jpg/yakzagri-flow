@@ -43,6 +43,22 @@ export const QUOTA_BYTES = 2 * 1024 * 1024; // 2 MB
 
 const STORAGE_PREFIX = "amana_cache_v1";
 
+/**
+ * User-scoped localStorage keys that hold sensitive data (trade drafts,
+ * wallet/notification state, offline write queue).  These are purged on
+ * explicit wallet disconnect (see useAuth.signOut).
+ */
+export const SENSITIVE_STORAGE_KEYS: readonly string[] = [
+  "offlineCache",
+  "notificationStore",
+  "tradeDrafts",
+  "trade_drafts",
+  "offlineWriteQueue",
+  "offline_write_queue",
+  "walletCache",
+  "wallet_cache",
+];
+
 /** TTLs in milliseconds per domain. */
 export const TTL_MS: Record<CacheDomain, number> = {
   trades_list: 5 * 60 * 1000,    // 5 min
@@ -97,6 +113,36 @@ export function getCacheUsageBytes(): number {
 }
 
 /**
+ * Evict all expired or corrupt cache entries across domains.
+ * Returns the number of entries evicted.
+ */
+export function evictExpiredEntries(now = Date.now()): number {
+  if (!isBrowser()) return 0;
+  const toRemove: string[] = [];
+
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k?.startsWith(`${STORAGE_PREFIX}:`)) continue;
+    const parts = k.split(":");
+    const domain = parts[1] as CacheDomain | undefined;
+    const ttl = domain && domain in TTL_MS ? TTL_MS[domain] : TTL_MS.trades_list;
+    try {
+      const raw = localStorage.getItem(k);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw) as { cachedAt?: number };
+      if (typeof parsed.cachedAt !== "number" || now - parsed.cachedAt > ttl * 2) {
+        toRemove.push(k);
+      }
+    } catch {
+      toRemove.push(k);
+    }
+  }
+
+  toRemove.forEach((k) => localStorage.removeItem(k));
+  return toRemove.length;
+}
+
+/**
  * Evict the single least-recently-written cache entry to free space.
  * Called when a write would exceed QUOTA_BYTES.
  */
@@ -133,7 +179,7 @@ function evictLRU(): void {
 
 /**
  * Write a value into the cache under domain + key.
- * Enforces quota by evicting LRU entries until enough space exists.
+ * Evicts expired entries first, then enforces quota by evicting LRU entries until enough space exists.
  */
 export function cacheWrite<T>(
   domain: CacheDomain,
@@ -141,6 +187,8 @@ export function cacheWrite<T>(
   data: T,
 ): void {
   if (!isBrowser()) return;
+
+  evictExpiredEntries();
 
   const entry: CacheEntry<T> = {
     data,
@@ -243,36 +291,33 @@ export function cacheClearAll(): void {
   toRemove.forEach((k) => localStorage.removeItem(k));
 }
 
+/**
+ * Purge all user-scoped sensitive data from localStorage on explicit wallet
+ * disconnect.  Removes the structured offline cache namespace plus the known
+ * sensitive keys (offline queue, notification store, trade drafts, wallet
+ * cache).  Best-effort and SSR-safe; missing keys are ignored.
+ */
+export function purgeSensitiveStorage(): void {
+  if (!isBrowser()) return;
+
+  // Structured cache namespace (trades, notifications).
+  cacheClearAll();
+
+  // Known user-scoped keys.
+  for (const key of SENSITIVE_STORAGE_KEYS) {
+    try {
+      localStorage.removeItem(key);
+    } catch {
+      // Ignore storage errors — best-effort purge.
+    }
+  }
+}
+
 // ─── Offline read helpers ────────────────────────────────────────────────────
 
 /**
- * Read the last-viewed trades list from the cache for offline reading.
- * Returns the cached data (even if stale) or null on a miss.
+ * Read the last-viewed trades list from the cache for offline use.
  */
-export function readCachedTradesList<T>(): T | null {
-  const { entry } = cacheRead<T>("trades_list", "all");
-  return entry?.data ?? null;
-}
-
-/**
- * Read a single last-viewed trade from the cache for offline reading.
- * Returns the cached data (even if stale) or null on a miss.
- */
-export function readCachedTradeDetail<T>(tradeId: string): T | null {
-  const { entry } = cacheRead<T>("trade_detail", tradeId);
-  return entry?.data ?? null;
-}
-
-/**
- * Persist the trades list for offline reading.
- */
-export function writeCachedTradesList<T>(data: T): void {
-  cacheWrite("trades_list", "all", data);
-}
-
-/**
- * Persist a single trade for offline reading.
- */
-export function writeCachedTradeDetail<T>(tradeId: string, data: T): void {
-  cacheWrite("trade_detail", tradeId, data);
+export function readCachedTradesList<T>(): CacheReadResult<T> {
+  return cacheRead<T>("trades_list", "all");
 }

@@ -62,7 +62,7 @@
       },
       "text": {
         "primary": {
-          "value": "#F0F5F1",
+          "value": "#F0F55F",
           "type": "color",
           "description": "Headings, prominent text"
         },
@@ -160,7 +160,7 @@
           "type": "color"
         },
         "surface-2": {
-          "value": "#F0F5F1",
+          "value": "#F0F55F",
           "type": "color"
         },
         "surface-3": {
@@ -342,7 +342,7 @@
           "type": "color"
         },
         "text-primary": {
-          "value": "#F0F5F1",
+          "value": "#F0F55F",
           "type": "color"
         },
         "text-secondary": {

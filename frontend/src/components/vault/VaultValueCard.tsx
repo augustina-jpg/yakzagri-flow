@@ -1,5 +1,5 @@
 "use client";
-import { t as translateCopy } from "@/lib/i18n";
+import { t as translateCopy, intlLocale, resolveLocale } from "@/lib/i18n";
 
 import { useState } from "react";
 import { BentoCard } from "@/components/ui/BentoCard";
@@ -20,8 +20,9 @@ export function VaultValueCard({
   onReleaseFunds,
 }: VaultValueCardProps) {
   const [showDisclaimer, setShowDisclaimer] = useState(false);
+  const activeIntlLocale = intlLocale(resolveLocale());
 
-  const formattedValue = new Intl.NumberFormat("en-US", {
+  const formattedValue = new Intl.NumberFormat(activeIntlLocale, {
     style: "currency",
     currency: currency,
     minimumFractionDigits: 0,

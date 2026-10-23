@@ -57,7 +57,7 @@ export function LoadingState({
   return (
     <div
       className={clsx(
-        "rounded-xl border border-border-default bg-card p-6 shadow-card",
+        "rounded-xl border border-border-default bg-card p-6 shadow-elev-1",
         className,
       )}
       aria-busy="true"

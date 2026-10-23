@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let body: { action?: string; payload?: unknown };
+  let body: { action?: string; payload?: unknown; sha256?: string };
 
   try {
     body = await request.json();
@@ -39,13 +39,49 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const { action, payload } = body;
+  const { action, payload, sha256 } = body;
 
   if (action !== 'pinJSONToIPFS') {
     return NextResponse.json(
       { error: `Unsupported Pinata action: ${action ?? 'undefined'}` },
       { status: 400 },
     );
+  }
+
+  if (sha256 !== undefined && !/^[a-f0-9]{64}$/i.test(sha256)) {
+    return NextResponse.json(
+      { error: 'Invalid SHA-256 digest' },
+      { status: 400 },
+    );
+  }
+
+  // Merge the client-computed digest into the pinataMetadata so it is
+  // persisted alongside the pinned content for tamper verification.
+  const pinataPayload =
+    payload && typeof payload === 'object'
+      ? { ...(payload as Record<string, unknown>) }
+      : {};
+
+  if (sha256) {
+    const existingMetadata =
+      pinataPayload.pinataMetadata &&
+      typeof pinataPayload.pinataMetadata === 'object'
+        ? (pinataPayload.pinataMetadata as Record<string, unknown>)
+        : {};
+
+    const existingKeyValues =
+      existingMetadata.keyvalues &&
+      typeof existingMetadata.keyvalues === 'object'
+        ? (existingMetadata.keyvalues as Record<string, unknown>)
+        : {};
+
+    pinataPayload.pinataMetadata = {
+      ...existingMetadata,
+      keyvalues: {
+        ...existingKeyValues,
+        sha256,
+      },
+    };
   }
 
   try {
@@ -56,7 +92,7 @@ export async function POST(request: NextRequest) {
         pinata_api_key: config.apiKey,
         pinata_secret_api_key: config.secret,
       },
-      body: JSON.stringify(payload ?? {}),
+      body: JSON.stringify(pinataPayload),
     });
 
     const data = await response.json();

@@ -1,11 +1,13 @@
 const CACHE_NAME = "amana-cache-v1";
 const API_CACHE_NAME = "amana-api-cache-v1";
 const API_CACHE_TTL_MS = 5 * 60 * 1000;
+const OFFLINE_URL = "/offline.html";
 const STATIC_ASSET_PATTERN = /\.(js|css|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|otf|webp|avif)$/;
 
 const STATIC_ASSETS = [
   "/",
   "/manifest.json",
+  OFFLINE_URL,
 ];
 
 const swScope = typeof self !== "undefined" ? self : globalThis;
@@ -38,6 +40,16 @@ if (typeof swScope.addEventListener === "function") {
   });
 
   swScope.addEventListener("fetch", handleFetch);
+}
+
+function isNavigationRequest(request) {
+  if (!request) return false;
+  if (request.mode === "navigate") return true;
+  if (request.destination === "document") return true;
+  const accept = request.headers && typeof request.headers.get === "function"
+    ? request.headers.get("accept")
+    : null;
+  return typeof accept === "string" && accept.includes("text/html");
 }
 
 function handleFetch(event) {
@@ -73,7 +85,34 @@ function handleFetch(event) {
     }
   }
 
+  // Document navigation requests: network-first, falling back to the cached
+  // offline shell when the network is unavailable and the route is uncached.
+  if (request.method === "GET" && isNavigationRequest(request)) {
+    event.respondWith(networkFirstNavigation(request));
+    return;
+  }
+
   event.respondWith(networkFirstWithCache(request));
+}
+
+async function networkFirstNavigation(request) {
+  try {
+    const response = await fetch(request);
+    if (response.ok) {
+      const cache = await caches.open(CACHE_NAME);
+      cache.put(request, response.clone());
+    }
+    return response;
+  } catch {
+    const cached = await caches.match(request);
+    if (cached) return cached;
+    const offline = await caches.match(OFFLINE_URL);
+    if (offline) return offline;
+    return new Response("Offline", {
+      status: 503,
+      headers: { "Content-Type": "text/html" },
+    });
+  }
 }
 
 async function cacheFirst(request) {
@@ -176,10 +215,13 @@ if (typeof module !== "undefined" && module.exports) {
   module.exports = {
     handleFetch,
     networkFirstWithCache,
+    networkFirstNavigation,
+    isNavigationRequest,
     cacheFirst,
     staleWhileRevalidate,
     networkOnly,
     CACHE_NAME,
     API_CACHE_NAME,
+    OFFLINE_URL,
   };
 }

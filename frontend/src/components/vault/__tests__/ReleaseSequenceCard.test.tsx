@@ -145,4 +145,79 @@ describe('ReleaseSequenceCard Component', () => {
         const settingsIcon = container.querySelector('[data-testid="settings-icon"]');
         expect(settingsIcon).toBeInTheDocument();
     });
+
+    describe('prerequisite status indicators', () => {
+        const stepsWithConditions = [
+            {
+                label: 'Agreement',
+                date: 'Oct 12, 2023',
+                status: 'completed' as const,
+                completedAt: 'Oct 12, 2023 14:32',
+                actorRole: 'Seller',
+            },
+            {
+                label: 'Audit Phase',
+                date: 'Processing...',
+                status: 'in-progress' as const,
+                condition: 'Awaiting driver manifest',
+            },
+            {
+                label: 'Final Release',
+                date: 'Est. Nov 04',
+                status: 'blocked' as const,
+                condition: 'Awaiting buyer PoD video',
+            },
+        ];
+
+        it('displays the specific unmet condition for a blocked stage', () => {
+            render(<ReleaseSequenceCard {...defaultProps} steps={stepsWithConditions} />);
+            expect(screen.getByText('Awaiting buyer PoD video')).toBeInTheDocument();
+        });
+
+        it('displays the unmet condition for an in-progress stage', () => {
+            render(<ReleaseSequenceCard {...defaultProps} steps={stepsWithConditions} />);
+            expect(screen.getByText('Awaiting driver manifest')).toBeInTheDocument();
+        });
+
+        it('exposes the blocked condition via a tooltip title', () => {
+            render(<ReleaseSequenceCard {...defaultProps} steps={stepsWithConditions} />);
+            const blockedCondition = screen.getByText('Awaiting buyer PoD video');
+            const tooltipHost = blockedCondition.closest('[title]');
+            expect(tooltipHost).toHaveAttribute('title', 'Awaiting buyer PoD video');
+        });
+
+        it('displays the completion timestamp for a completed stage', () => {
+            render(<ReleaseSequenceCard {...defaultProps} steps={stepsWithConditions} />);
+            expect(screen.getByText('Oct 12, 2023 14:32')).toBeInTheDocument();
+        });
+
+        it('displays the actor role for a completed stage', () => {
+            render(<ReleaseSequenceCard {...defaultProps} steps={stepsWithConditions} />);
+            expect(screen.getByText('Seller')).toBeInTheDocument();
+        });
+
+        it('marks blocked stages with a blocked status indicator', () => {
+            const { container } = render(
+                <ReleaseSequenceCard {...defaultProps} steps={stepsWithConditions} />
+            );
+            const blockedStep = screen.getByText('Final Release').closest('.flex.flex-col');
+            expect(blockedStep).toBeInTheDocument();
+            expect(blockedStep?.querySelector('[data-status="blocked"]')).toBeInTheDocument();
+            expect(container.querySelector('.bg-red-muted')).toBeInTheDocument();
+        });
+
+        it('marks completed stages with a completed status indicator', () => {
+            render(<ReleaseSequenceCard {...defaultProps} steps={stepsWithConditions} />);
+            const completedStep = screen.getByText('Agreement').closest('.flex.flex-col');
+            expect(completedStep?.querySelector('[data-status="completed"]')).toBeInTheDocument();
+        });
+
+        it('does not render a condition for stages without one', () => {
+            const steps = [
+                { label: 'Agreement', date: 'Oct 12, 2023', status: 'completed' as const },
+            ];
+            render(<ReleaseSequenceCard {...defaultProps} steps={steps} />);
+            expect(screen.queryByText('Awaiting buyer PoD video')).not.toBeInTheDocument();
+        });
+    });
 });

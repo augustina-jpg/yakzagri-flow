@@ -1,5 +1,5 @@
 "use client";
-import { createContext, useContext, useState, useEffect } from "react";
+import { createContext, useContext, useState, useEffect, useRef } from "react";
 
 export type TradeData = {
   // Step 1
@@ -9,6 +9,7 @@ export type TradeData = {
   pricePerUnit: string;
   currency: string;
   sellerAddress: string;
+  deliveryWindow: string;
   // Step 2
   buyerRatio: number;
   sellerRatio: number;
@@ -21,6 +22,7 @@ type TradeContextType = {
   setStep: (s: number) => void;
   data: TradeData;
   update: (partial: Partial<TradeData>) => void;
+  resetTradeWizard: () => void;
 };
 
 const defaults: TradeData = {
@@ -30,6 +32,7 @@ const defaults: TradeData = {
   pricePerUnit: "",
   currency: "NGN",
   sellerAddress: "",
+  deliveryWindow: "",
   buyerRatio: 50,
   sellerRatio: 50,
   deliveryDays: "7",
@@ -40,27 +43,41 @@ const TradeContext = createContext<TradeContextType>({} as TradeContextType);
 
 const STORAGE_KEY = "amana:draft-trade";
 
-export function TradeProvider({ children }: { children: React.ReactNode }) {
+export function TradeProvider({
+  children,
+  initialData,
+}: {
+  children: React.ReactNode;
+  initialData?: Partial<TradeData>;
+}) {
   const [step, setStep] = useState(1);
+  const [resetVersion, setResetVersion] = useState(0);
+  const persistedResetVersion = useRef(0);
   const [data, setData] = useState<TradeData>(() => {
+    let base: TradeData = defaults;
     if (typeof window !== "undefined") {
       try {
         const raw = localStorage.getItem(STORAGE_KEY);
         if (raw) {
           const parsed = JSON.parse(raw);
-          return { ...defaults, ...parsed.data } as TradeData;
+          base = { ...defaults, ...parsed.data } as TradeData;
         }
       } catch {}
     }
-    return defaults;
+    // Deep-linked initial data takes precedence on first mount
+    return initialData ? { ...base, ...initialData } : base;
   });
 
   // Persist draft locally — survives refresh/restart, replays via offline queue
   useEffect(() => {
+    if (persistedResetVersion.current !== resetVersion) {
+      persistedResetVersion.current = resetVersion;
+      return;
+    }
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({ data, step, savedAt: new Date().toISOString() }));
     } catch {}
-  }, [data, step]);
+  }, [data, step, resetVersion]);
 
   // Restore step on mount
   useEffect(() => {
@@ -76,8 +93,17 @@ export function TradeProvider({ children }: { children: React.ReactNode }) {
   const update = (partial: Partial<TradeData>) =>
     setData((prev) => ({ ...prev, ...partial }));
 
+  const resetTradeWizard = () => {
+    setResetVersion((version) => version + 1);
+    setData(defaults);
+    setStep(1);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {}
+  };
+
   return (
-    <TradeContext.Provider value={{ step, setStep, data, update }}>
+    <TradeContext.Provider value={{ step, setStep, data, update, resetTradeWizard }}>
       {children}
     </TradeContext.Provider>
   );
