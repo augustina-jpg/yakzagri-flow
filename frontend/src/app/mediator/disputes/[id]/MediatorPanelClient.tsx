@@ -26,8 +26,11 @@ import {
   ModalTitle,
 } from "@/components/ui/Modal";
 import { api, ApiError, type EvidenceRecord } from "@/lib/api";
+import { IPFS_GATEWAYS, buildIpfsGatewayUrl } from "@/lib/links";
 
 type Props = { disputeId: string };
+
+type ResolutionOutcome = "equal" | "seller-favoured";
 
 type ConfirmationModalState = {
   isOpen: boolean;
@@ -40,14 +43,43 @@ type VideoLoadState = "loading" | "ready" | "terminal-failure";
 const DEFAULT_MEDIATOR_ADDRESSES = ["GEXAMPLEMEDIATORPUBLICKEY1"];
 const TOKEN_STORAGE_KEY = "amana_jwt";
 
-const PINATA_GATEWAYS = [
-  process.env.NEXT_PUBLIC_PINATA_GATEWAY_URL?.trim(),
-  "https://gateway.pinata.cloud/ipfs",
-  "https://ipfs.io/ipfs",
-].filter((value): value is string => Boolean(value));
+const MIN_JUSTIFICATION_LENGTH = 30;
 
 const DEFAULT_NETWORK_PASSPHRASE = Networks.TESTNET;
 const isDev = process.env.NEXT_PUBLIC_APP_ENV === "development";
+
+type ResolutionSplit = {
+  sellerGetsBps: number;
+  buyerGetsBps: number;
+  splitLabel: string;
+};
+
+function getResolutionSplit(outcome: ResolutionOutcome): ResolutionSplit {
+  const sellerGetsBps = outcome === "seller-favoured" ? 7000 : 5000;
+  return {
+    sellerGetsBps,
+    buyerGetsBps: 10000 - sellerGetsBps,
+    splitLabel: outcome === "seller-favoured" ? "70/30" : "50/50",
+  };
+}
+
+function canSubmitResolution(
+  outcome: ResolutionOutcome | null,
+  justification: string,
+): boolean {
+  return (
+    outcome !== null &&
+    justification.trim().length >= MIN_JUSTIFICATION_LENGTH
+  );
+}
+
+function formatCngn(bps: number, totalCngn: number): string {
+  const amount = (totalCngn * bps) / 10000;
+  return `${amount.toLocaleString(undefined, {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })} cNGN`;
+}
 
 function getStoredToken(): string | null {
   if (typeof window === "undefined") {
@@ -103,6 +135,9 @@ export default function MediatorPanelClient({ disputeId }: Props) {
     "backend" | "query" | "none" | "loading"
   >("loading");
   const [cidMessage, setCidMessage] = useState("");
+  const [cidCopyMessage, setCidCopyMessage] = useState("");
+  const [outcome, setOutcome] = useState<ResolutionOutcome | null>(null);
+  const [justification, setJustification] = useState("");
   const [modal, setModal] = useState<ConfirmationModalState>({
     isOpen: false,
     sellerGetsBps: null,
@@ -129,8 +164,16 @@ export default function MediatorPanelClient({ disputeId }: Props) {
     process.env.NEXT_PUBLIC_STELLAR_NETWORK === "public" ? "public" : "testnet";
 
   const pinataUrl = resolvedCid
-    ? `${PINATA_GATEWAYS[activeGatewayIndex]}/${resolvedCid}`
+    ? buildIpfsGatewayUrl(resolvedCid, activeGatewayIndex)
     : null;
+
+  const resolutionSplit = outcome ? getResolutionSplit(outcome) : null;
+  const isResolutionReady = canSubmitResolution(outcome, justification);
+  const escrowTotalCngn = Number(
+    process.env.NEXT_PUBLIC_DISPUTE_ESCROW_CNGN ?? "0",
+  );
+  const hasEscrowTotal =
+    Number.isFinite(escrowTotalCngn) && escrowTotalCngn > 0;
 
   useEffect(() => {
     let cancelled = false;
@@ -235,7 +278,7 @@ export default function MediatorPanelClient({ disputeId }: Props) {
 
   function handleVideoError() {
     const nextIndex = activeGatewayIndex + 1;
-    if (nextIndex < PINATA_GATEWAYS.length) {
+    if (nextIndex < IPFS_GATEWAYS.length) {
       setActiveGatewayIndex(nextIndex);
       setVideoLoadState("loading");
     } else {
@@ -244,9 +287,26 @@ export default function MediatorPanelClient({ disputeId }: Props) {
   }
 
   function switchGateway() {
-    const nextIndex = (activeGatewayIndex + 1) % PINATA_GATEWAYS.length;
+    const nextIndex = (activeGatewayIndex + 1) % IPFS_GATEWAYS.length;
     setActiveGatewayIndex(nextIndex);
     setVideoLoadState("loading");
+  }
+
+  async function copyCid() {
+    if (!resolvedCid) {
+      return;
+    }
+
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard) {
+        await navigator.clipboard.writeText(resolvedCid);
+        setCidCopyMessage("CID copied to clipboard.");
+      } else {
+        setCidCopyMessage("Clipboard unavailable. Copy the CID manually.");
+      }
+    } catch {
+      setCidCopyMessage("Clipboard unavailable. Copy the CID manually.");
+    }
   }
 
   function buildExec(split: string) {
@@ -258,8 +318,15 @@ export default function MediatorPanelClient({ disputeId }: Props) {
     setModal({ isOpen: true, sellerGetsBps, splitLabel });
   }
 
-  function getBuyerSplit(sellerBps: number): number {
-    return 10000 - sellerBps;
+  function handleResolveClick() {
+    if (!resolutionSplit || !isResolutionReady) {
+      return;
+    }
+
+    openConfirmationModal(
+      resolutionSplit.sellerGetsBps,
+      resolutionSplit.splitLabel,
+    );
   }
 
   function closeModal() {
@@ -434,6 +501,12 @@ export default function MediatorPanelClient({ disputeId }: Props) {
                 >
                   {translateCopy("ui.retry_from_first_gateway_bb038ef")}
                 </button>
+                <button
+                  onClick={switchGateway}
+                  className="px-4 py-2 bg-bg-elevated border border-border-default text-text-primary text-sm rounded-md hover:bg-bg-input transition-colors"
+                >
+                  Switch IPFS Gateway
+                </button>
               </div>
             ) : (
               <>
@@ -443,7 +516,7 @@ export default function MediatorPanelClient({ disputeId }: Props) {
                       <div className="animate-spin w-8 h-8 border-2 border-gold border-t-transparent rounded-full" />
                       <span className="text-gray-300 text-xs">
                         {translateCopy("ui.loading_via_gateway_2460fac")}{" "}{activeGatewayIndex + 1}/
-                        {PINATA_GATEWAYS.length}…
+                        {IPFS_GATEWAYS.length}…
                       </span>
                     </div>
                   </div>
@@ -470,17 +543,17 @@ export default function MediatorPanelClient({ disputeId }: Props) {
             <div className="flex flex-wrap items-center gap-3">
               {pinataUrl && videoLoadState !== "terminal-failure" && (
                 <span className="text-xs text-text-muted">
-                  {translateCopy("ui.gateway_5a0e181")}{" "}{activeGatewayIndex + 1}/{PINATA_GATEWAYS.length}
+                  {translateCopy("ui.gateway_5a0e181")}{" "}{activeGatewayIndex + 1}/{IPFS_GATEWAYS.length}
                 </span>
               )}
               {pinataUrl &&
-                PINATA_GATEWAYS.length > 1 &&
+                IPFS_GATEWAYS.length > 1 &&
                 videoLoadState !== "terminal-failure" && (
                   <button
                     onClick={switchGateway}
                     className="text-xs text-gold hover:underline underline-offset-2"
                   >
-                    {translateCopy("ui.switch_gateway_162f42d")}
+                    Switch IPFS Gateway
                   </button>
                 )}
               {isMediator ? (
@@ -490,6 +563,25 @@ export default function MediatorPanelClient({ disputeId }: Props) {
               )}
             </div>
           </div>
+
+          {/* Raw CID for independent verification */}
+          {resolvedCid && (
+            <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-text-muted">IPFS CID:</span>
+              <span className="font-mono text-text-primary break-all">
+                {resolvedCid}
+              </span>
+              <button
+                onClick={() => void copyCid()}
+                className="px-2 py-1 border border-border-default rounded text-text-primary hover:bg-bg-elevated transition-colors"
+              >
+                Copy CID
+              </button>
+              {cidCopyMessage && (
+                <span className="text-text-muted">{cidCopyMessage}</span>
+              )}
+            </div>
+          )}
 
           {/* Dev-only: IPFS debug info */}
           {isDev && (
@@ -501,7 +593,7 @@ export default function MediatorPanelClient({ disputeId }: Props) {
               <div>
                 {translateCopy("ui.gateway_7946db5")}{" "}
                 <Badge variant="info">
-                  {PINATA_GATEWAYS[activeGatewayIndex]}
+                  {IPFS_GATEWAYS[activeGatewayIndex]}
                 </Badge>
               </div>
               <div>{translateCopy("ui.wallet_9ab9249")}{" "}{address ?? "Not connected"}</div>
@@ -554,44 +646,73 @@ export default function MediatorPanelClient({ disputeId }: Props) {
               </Badge>
             )}
 
-            {/* Primary actions */}
-            <div className="grid grid-cols-1 gap-3">
-              <button
-                disabled={!canResolve}
-                onClick={() => handleOpenConfirmation(5000, "50/50")}
-                data-testid="resolve-split-50-50"
-                className="w-full rounded-md bg-emerald-700 text-white px-3 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-emerald-800 transition"
-              >
-                {translateCopy("ui.resolve_equal_split_50_50_8b3305d")}
-              </button>
-
-              <button
-                disabled={!canResolve}
-                onClick={() => handleOpenConfirmation(7000, "70/30")}
-                data-testid="resolve-split-70-30"
-                className="w-full rounded-md bg-emerald-700 text-white px-3 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-emerald-800 transition"
-              >
-                {translateCopy("ui.resolve_seller_favoured_70_30_3711ff4")}
-              </button>
-
-              <button
-                disabled={!canResolve}
-                onClick={() => handleOpenConfirmation(0, "0/100")}
-                data-testid="resolve-split-0-100"
-                className="w-full rounded-md bg-emerald-700 text-white px-3 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-emerald-800 transition"
-              >
-                {translateCopy("ui.resolve_buyer_win_0_100_placeholder")}
-              </button>
-
-              <button
-                disabled={!canResolve}
-                onClick={() => handleOpenConfirmation(10000, "100/0")}
-                data-testid="resolve-split-100-0"
-                className="w-full rounded-md bg-emerald-700 text-white px-3 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-emerald-800 transition"
-              >
-                {translateCopy("ui.resolve_seller_win_100_0_placeholder")}
-              </button>
+            {/* Outcome selection */}
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                Outcome
+              </p>
+              <div className="grid grid-cols-1 gap-2">
+                <button
+                  type="button"
+                  disabled={!isMediator || isSubmittingTx}
+                  onClick={() => setOutcome("equal")}
+                  aria-pressed={outcome === "equal"}
+                  className={`w-full rounded-md border px-3 py-2 text-sm font-medium transition disabled:opacity-50 ${
+                    outcome === "equal"
+                      ? "border-emerald-700 bg-emerald-700 text-white"
+                      : "border-border-default bg-bg-elevated text-text-primary hover:bg-bg-input"
+                  }`}
+                >
+                  {translateCopy("ui.resolve_equal_split_50_50_8b3305d")}
+                </button>
+                <button
+                  type="button"
+                  disabled={!isMediator || isSubmittingTx}
+                  onClick={() => setOutcome("seller-favoured")}
+                  aria-pressed={outcome === "seller-favoured"}
+                  className={`w-full rounded-md border px-3 py-2 text-sm font-medium transition disabled:opacity-50 ${
+                    outcome === "seller-favoured"
+                      ? "border-emerald-700 bg-emerald-700 text-white"
+                      : "border-border-default bg-bg-elevated text-text-primary hover:bg-bg-input"
+                  }`}
+                >
+                  {translateCopy("ui.resolve_seller_favoured_70_30_3711ff4")}
+                </button>
+              </div>
             </div>
+
+            {/* Justification note */}
+            <div className="space-y-1">
+              <label
+                htmlFor="resolution-justification"
+                className="text-xs font-semibold uppercase tracking-wide text-text-secondary"
+              >
+                Justification note
+              </label>
+              <textarea
+                id="resolution-justification"
+                value={justification}
+                onChange={(event) => setJustification(event.target.value)}
+                disabled={!isMediator || isSubmittingTx}
+                rows={4}
+                placeholder="Describe the finding that justifies this split (min. 30 characters)."
+                className="block w-full rounded-md border border-border-default bg-bg-elevated p-2 text-sm text-text-primary disabled:opacity-50"
+              />
+              <p className="text-xs text-text-muted">
+                {justification.trim().length}/{MIN_JUSTIFICATION_LENGTH}{" "}
+                characters minimum
+              </p>
+            </div>
+
+            {/* Primary action */}
+            <button
+              type="button"
+              disabled={!isMediator || isSubmittingTx || !isResolutionReady}
+              onClick={handleResolveClick}
+              className="w-full rounded-md bg-emerald-700 text-white px-3 py-2.5 text-sm font-medium disabled:opacity-50 hover:bg-emerald-800 transition"
+            >
+              Resolve dispute
+            </button>
 
             {/* Tx status feedback */}
             {txStatus && (
@@ -714,7 +835,49 @@ export default function MediatorPanelClient({ disputeId }: Props) {
                       {(getBuyerSplit(modal.sellerGetsBps) / 100).toFixed(2)}%
                     </span>
                   </div>
+                  <div className="border-t border-border-default" />
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-text-secondary">
+                      Seller payout
+                    </span>
+                    <span className="text-sm font-semibold text-status-success">
+                      {hasEscrowTotal
+                        ? formatCngn(modal.sellerGetsBps, escrowTotalCngn)
+                        : `${(modal.sellerGetsBps / 100).toFixed(2)}% of escrow`}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-medium text-text-secondary">
+                      Buyer payout
+                    </span>
+                    <span className="text-sm font-semibold text-gold">
+                      {hasEscrowTotal
+                        ? formatCngn(
+                            getBuyerSplit(modal.sellerGetsBps),
+                            escrowTotalCngn,
+                          )
+                        : `${(getBuyerSplit(modal.sellerGetsBps) / 100).toFixed(2)}% of escrow`}
+                    </span>
+                  </div>
+                  {!hasEscrowTotal && (
+                    <p className="text-xs text-text-muted">
+                      Escrow total unavailable. Set
+                      NEXT_PUBLIC_DISPUTE_ESCROW_CNGN to display exact cNGN
+                      amounts.
+                    </p>
+                  )}
                 </div>
+
+                {justification.trim() && (
+                  <div className="rounded-lg border border-border-default bg-bg-elevated p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+                      Justification
+                    </p>
+                    <p className="mt-1 text-sm text-text-primary whitespace-pre-wrap">
+                      {justification.trim()}
+                    </p>
+                  </div>
+                )}
 
                 <div className="rounded-lg bg-yellow-50 border border-yellow-200 p-3">
                   <ModalDescription className="text-xs text-yellow-800">
@@ -735,9 +898,12 @@ export default function MediatorPanelClient({ disputeId }: Props) {
                   {translateCopy("common.cancel")}
                 </button>
                 <button
-                  onClick={handleConfirmResolution}
-                  disabled={isSubmittingTx}
-                  data-testid="confirm-resolution"
+                  onClick={() => {
+                    const bps = modal.sellerGetsBps!;
+                    closeModal();
+                    void executeResolution(bps);
+                  }}
+                  disabled={isSubmittingTx || !isResolutionReady}
                   className="px-3 sm:px-4 py-2.5 bg-emerald-700 text-white text-sm font-medium rounded-md hover:bg-emerald-800 disabled:opacity-50 transition"
                   aria-label={translateCopy("ui.confirm_and_sign_resolution_2d0dc86")}
                 >

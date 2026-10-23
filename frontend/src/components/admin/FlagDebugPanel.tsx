@@ -18,16 +18,24 @@ import { useState } from "react";
 import { useFlags } from "@/components/FeatureFlagsProvider";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
 import { FLAG_CATALOG, type FlagName } from "@/lib/featureFlags";
+import { DEFAULT_LOCALE } from "@/lib/i18n";
+import { useLocale } from "@/lib/i18n/LocaleProvider";
 
 export function FlagDebugPanel() {
   const isAdmin = useIsAdmin();
   const { isLoading, refresh, ...flags } = useFlags();
+  const { locale, setLocale } = useLocale();
   const [isOpen, setIsOpen] = useState(false);
 
   // Only render for staff role — never visible to end users.
   if (!isAdmin) return null;
 
   const flagEntries = Object.keys(FLAG_CATALOG) as FlagName[];
+  const isPseudoActive = locale === "pseudo";
+
+  function handleTogglePseudoLocale() {
+    setLocale(isPseudoActive ? DEFAULT_LOCALE : "pseudo");
+  }
 
   return (
     <div
@@ -96,6 +104,26 @@ export function FlagDebugPanel() {
               );
             })}
           </ul>
+
+          {/* Pseudo-locale toggle for layout overflow testing */}
+          <div className="flex items-center justify-between border-t border-border-default px-4 py-2.5">
+            <span className="text-text-secondary">Pseudo-locale (overflow)</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={isPseudoActive}
+              aria-label="Toggle pseudo-locale for layout overflow testing"
+              data-testid="flag-debug-pseudo-locale-toggle"
+              onClick={handleTogglePseudoLocale}
+              className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide transition-colors ${
+                isPseudoActive
+                  ? "bg-status-success/15 text-status-success"
+                  : "bg-status-danger/15 text-status-danger"
+              }`}
+            >
+              {isPseudoActive ? "ON" : "OFF"}
+            </button>
+          </div>
 
           {/* Footer note */}
           <div className="border-t border-border-default px-4 py-2 text-[10px] text-text-muted">

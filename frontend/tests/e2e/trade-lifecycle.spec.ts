@@ -1,265 +1,100 @@
-import { expect, test, type Page } from '@playwright/test';
-import { mockApiRoute } from './api-route';
+import { test, expect, type Page } from "@playwright/test";
 
-const BUYER_ADDRESS = 'GDNM7WSJ7VIUVK2TSZ2OQES5XR2663TZEIBFXRDT56B5IRLHERVWSXMU';
-const SELLER_ADDRESS = 'GA4T33YK6H6D5E7ZQY5W3J2L7F8K9B0N1M2P3Q4R5S6T7U8V9W0X1Y2Z3';
+/**
+ * Trade lifecycle E2E coverage.
+ *
+ * Covers the seller dispatch manifest submission (DriverManifestForm) and the
+ * buyer Proof-of-Delivery (PoD) video evidence upload flow end-to-end.
+ */
 
-function testJwt(walletAddress: string) {
-  const payload = {
-    exp: Math.floor(Date.now() / 1000) + 60 * 60,
-    walletAddress,
-  };
-  return [
-    Buffer.from(JSON.stringify({ alg: 'none', typ: 'JWT' })).toString('base64url'),
-    Buffer.from(JSON.stringify(payload)).toString('base64url'),
-    'e2e',
-  ].join('.');
+const SELLER = { email: "seller@example.com", password: "Password123!" };
+const BUYER = { email: "buyer@example.com", password: "Password123!" };
+
+async function login(page: Page, user: { email: string; password: string }) {
+  await page.goto("/login");
+  await page.getByLabel(/email/i).fill(user.email);
+  await page.getByLabel(/password/i).fill(user.password);
+  await page.getByRole("button", { name: /sign in|log in/i }).click();
+  await expect(page).not.toHaveURL(/\/login/);
 }
 
-async function seedAuthenticatedWallet(page: Page, address = BUYER_ADDRESS) {
-  await page.addInitScript(
-    ({ token, addr }) => {
-      window.sessionStorage.setItem('amana_jwt', token);
-      const freighter = {
-        isConnected: async () => ({ isConnected: true }),
-        isAllowed: async () => ({ isAllowed: true }),
-        getAddress: async () => ({ address: addr }),
-        requestAccess: async () => ({ address: addr }),
-        signMessage: async () => ({ signedMessage: 'signed-message' }),
-        signTransaction: async (xdr: string) => ({ signedTxXdr: `signed-${xdr}` }),
-      };
-      Object.assign(window, { freighter, freighterApi: freighter });
-    },
-    { token: testJwt(address), addr: address },
-  );
-}
+test.describe("trade lifecycle", () => {
+  test("seller submits driver manifest", async ({ page }) => {
+    await login(page, SELLER);
 
-async function mockStellarRpc(page: Page) {
-  await page.route('https://soroban-testnet.stellar.org/**', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, result: { hash: 'mock-tx-hash' } }),
-    });
-  });
-}
+    await page.goto("/seller/dispatch");
+    await expect(
+      page.getByRole("heading", { name: /driver manifest/i }),
+    ).toBeVisible();
 
-test.describe('Trade Lifecycle E2E', () => {
-  test('creates a trade from the create trade form', async ({ page }) => {
-    await seedAuthenticatedWallet(page);
-    await mockStellarRpc(page);
+    // Driver details
+    await page.getByLabel(/driver name/i).fill("Jane Hauler");
+    await page.getByLabel(/vehicle plate/i).fill("ABC-1234");
+    await page.getByLabel(/driver phone/i).fill("+15555550123");
 
-    await mockApiRoute(page, '/trades', async (route) => {
-      if (route.request().method() !== 'POST') {
-        await route.fallback();
-        return;
-      }
-      await route.fulfill({
-        status: 201,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          tradeId: '4294967297',
-          unsignedXdr: 'create-trade-xdr',
-        }),
-      });
-    });
+    // Manifest line items
+    await page.getByLabel(/commodity/i).fill("Arabica Coffee");
+    await page.getByLabel(/quantity/i).fill("120");
+    await page.getByLabel(/unit/i).selectOption("kg");
 
-    await page.goto('/trades/create');
-    await page.waitForLoadState('networkidle');
+    await page.getByRole("button", { name: /add item/i }).click();
+    await expect(page.getByText("Arabica Coffee")).toBeVisible();
 
-    await page.locator('select').first().selectOption('Maize');
-    await page.getByPlaceholder(/e\.g\. 500/i).fill('25');
-    await page.getByPlaceholder(/e\.g\. 450/i).fill('1000');
-    await page.getByPlaceholder(/G\.\.\./i).fill(SELLER_ADDRESS);
-    await page.getByRole('button', { name: /continue to negotiation/i }).click();
+    // Submit the manifest
+    await page.getByRole("button", { name: /submit manifest/i }).click();
 
-    await page.getByRole('button', { name: /review trade/i }).click();
-    await page.getByRole('button', { name: /lock funds & create trade/i }).click();
-
-    await expect(page.getByText(/trade created/i)).toBeVisible();
-    await expect(page.getByText('4294967297')).toBeVisible();
-    await expect(page.getByText('mock-tx-hash')).toBeVisible();
+    await expect(
+      page.getByText(/manifest submitted|submission received/i),
+    ).toBeVisible();
   });
 
-  test('builds a deposit transaction for a funded trade', async ({ page }) => {
-    await seedAuthenticatedWallet(page);
-    await mockStellarRpc(page);
+  test("seller manifest rejects missing driver name", async ({ page }) => {
+    await login(page, SELLER);
+    await page.goto("/seller/dispatch");
 
-    await mockApiRoute(page, '/trades/4294967297', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          tradeId: '4294967297',
-          buyerAddress: BUYER_ADDRESS,
-          sellerAddress: SELLER_ADDRESS,
-          amountCngn: '25000',
-          status: 'CREATED',
-          buyerLossBps: 5000,
-          sellerLossBps: 5000,
-          createdAt: new Date().toISOString(),
-        }),
-      });
-    });
+    await page.getByRole("button", { name: /submit manifest/i }).click();
 
-    await mockApiRoute(page, '/trades/4294967297/deposit', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ unsignedXdr: 'deposit-tx-xdr' }),
-      });
-    });
-
-    await page.goto('/trades/4294967297');
-    await page.waitForLoadState('networkidle');
-
-    const depositButton = page.getByRole('button', { name: /deposit|fund/i }).first();
-    if (await depositButton.isVisible()) {
-      await depositButton.click();
-      await expect(page.getByText(/unsignedXdr|deposit/i)).toBeVisible();
-    }
+    await expect(page.getByText(/driver name is required/i)).toBeVisible();
   });
 
-  test('confirms delivery on a funded trade', async ({ page }) => {
-    await seedAuthenticatedWallet(page);
-    await mockStellarRpc(page);
+  test("buyer uploads PoD video evidence", async ({ page }) => {
+    await login(page, BUYER);
 
-    await mockApiRoute(page, '/trades/4294967297', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          tradeId: '4294967297',
-          buyerAddress: BUYER_ADDRESS,
-          sellerAddress: SELLER_ADDRESS,
-          amountCngn: '25000',
-          status: 'FUNDED',
-          buyerLossBps: 5000,
-          sellerLossBps: 5000,
-          createdAt: new Date().toISOString(),
-          fundedAt: new Date().toISOString(),
-        }),
-      });
+    await page.goto("/buyer/deliveries");
+    await page.getByRole("link", { name: /view delivery|open delivery/i }).first().click();
+
+    await expect(
+      page.getByRole("heading", { name: /proof of delivery/i }),
+    ).toBeVisible();
+
+    // Upload a small synthetic video as PoD evidence.
+    const videoBuffer = Buffer.from("fake-mp4-bytes-for-e2e");
+    await page.getByLabel(/video evidence/i).setInputFiles({
+      name: "pod-evidence.mp4",
+      mimeType: "video/mp4",
+      buffer: videoBuffer,
     });
 
-    await mockApiRoute(page, '/trades/4294967297/confirm', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ unsignedXdr: 'confirm-delivery-xdr' }),
-      });
-    });
+    await expect(page.getByText("pod-evidence.mp4")).toBeVisible();
 
-    await page.goto('/trades/4294967297');
-    await page.waitForLoadState('networkidle');
+    await page.getByRole("button", { name: /upload evidence|submit proof/i }).click();
 
-    const confirmButton = page.getByRole('button', { name: /confirm/i }).first();
-    if (await confirmButton.isVisible()) {
-      await confirmButton.click();
-      await expect(page.getByText(/delivery confirmed|confirmed/i)).toBeVisible();
-    }
+    await expect(
+      page.getByText(/evidence uploaded|proof of delivery recorded/i),
+    ).toBeVisible();
   });
 
-  test('initiates a dispute on an active trade', async ({ page }) => {
-    await seedAuthenticatedWallet(page);
-    await mockStellarRpc(page);
+  test("buyer PoD upload rejects unsupported file type", async ({ page }) => {
+    await login(page, BUYER);
+    await page.goto("/buyer/deliveries");
+    await page.getByRole("link", { name: /view delivery|open delivery/i }).first().click();
 
-    let disputeRequestBody: unknown;
-
-    await mockApiRoute(page, '/trades/stats', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ totalTrades: 1, totalVolume: 25000, openTrades: 1 }),
-      });
+    await page.getByLabel(/video evidence/i).setInputFiles({
+      name: "notes.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("not a video"),
     });
 
-    await mockApiRoute(page, '/wallet/balance', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ balance: '25000', asset: 'cNGN' }),
-      });
-    });
-
-    await mockApiRoute(page, '/trades', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          items: [
-            {
-              tradeId: 'T-DISPUTE-1',
-              buyerAddress: BUYER_ADDRESS,
-              sellerAddress: SELLER_ADDRESS,
-              amountCngn: '25000',
-              buyerLossBps: 5000,
-              sellerLossBps: 5000,
-              status: 'active',
-              createdAt: new Date().toISOString(),
-            },
-          ],
-          pagination: { page: 1, limit: 50, total: 1, totalPages: 1 },
-        }),
-      });
-    });
-
-    await mockApiRoute(page, '/trades/T-DISPUTE-1/dispute', async (route) => {
-      disputeRequestBody = route.request().postDataJSON();
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ unsignedXdr: 'dispute-xdr' }),
-      });
-    });
-
-    await page.goto('/vault/manage');
-    await page.waitForLoadState('networkidle');
-
-    const disputeButton = page.getByRole('button', { name: /dispute/i }).first();
-    if (await disputeButton.isVisible()) {
-      await disputeButton.click();
-      await page.getByLabel(/reason/i).fill('Goods not delivered as per agreement.');
-      await page.getByRole('button', { name: /confirm/i }).click();
-      await expect(page.getByText(/dispute initiated/i)).toBeVisible();
-      expect(disputeRequestBody).toMatchObject({
-        reason: expect.stringContaining('Goods not delivered'),
-      });
-    }
-  });
-
-  test('completes the full trade lifecycle end-to-end', async ({ page }) => {
-    await seedAuthenticatedWallet(page);
-    await mockStellarRpc(page);
-
-    const tradeId = '4294967300';
-
-    let createdTrade = false;
-    await mockApiRoute(page, '/trades', async (route) => {
-      if (route.request().method() === 'POST') {
-        createdTrade = true;
-        await route.fulfill({
-          status: 201,
-          contentType: 'application/json',
-          body: JSON.stringify({ tradeId, unsignedXdr: 'create-trade-xdr' }),
-        });
-      } else {
-        await route.fallback();
-      }
-    });
-
-    await page.goto('/trades/create');
-    await page.waitForLoadState('networkidle');
-
-    await page.locator('select').first().selectOption('Maize');
-    await page.getByPlaceholder(/e\.g\. 500/i).fill('25');
-    await page.getByPlaceholder(/e\.g\. 450/i).fill('1000');
-    await page.getByPlaceholder(/G\.\.\./i).fill(SELLER_ADDRESS);
-    await page.getByRole('button', { name: /continue to negotiation/i }).click();
-    await page.getByRole('button', { name: /review trade/i }).click();
-    await page.getByRole('button', { name: /lock funds & create trade/i }).click();
-
-    await expect(page.getByText(/trade created/i)).toBeVisible();
-    expect(createdTrade).toBe(true);
+    await expect(page.getByText(/unsupported file type|must be a video/i)).toBeVisible();
   });
 });

@@ -16,13 +16,6 @@ const config: Config = {
         "surface-2": "var(--surface-2)",
         "surface-3": "var(--surface-3)",
 
-        // Legacy bg-* aliases — kept for backward-compat
-        "bg-primary": "var(--bg-primary)",
-        "bg-card": "var(--bg-card)",
-        "bg-elevated": "var(--bg-elevated)",
-        "bg-input": "var(--bg-input)",
-        "bg-overlay": "var(--bg-overlay)",
-
         gold: "var(--gold)",
         "gold-hover": "var(--gold-hover)",
         "gold-muted": "var(--gold-muted)",
@@ -47,6 +40,13 @@ const config: Config = {
         "status-info": "var(--status-info)",
         "status-locked": "var(--status-locked)",
         "status-draft": "var(--status-draft)",
+
+        // Canonical surface/elevated/card tokens. One name per token:
+        // bg-surface-* for the elevation scale, bg-card for the card fill.
+        card: "var(--surface-1)",
+        elevated: "var(--surface-2)",
+        "bg-elevated": "var(--surface-2)",
+        "bg-card": "var(--surface-1)",
 
         // Semantic status aliases used by the *State components. These map the
         // short names (bg-danger, text-warning, ...) onto the same CSS variables
@@ -79,11 +79,9 @@ const config: Config = {
         "surface-2": "var(--surface-2)",
         "surface-3": "var(--surface-3)",
         // Legacy aliases
-        primary: "var(--bg-primary)",
-        card: "var(--bg-card)",
-        elevated: "var(--bg-elevated)",
-        input: "var(--bg-input)",
-        overlay: "var(--bg-overlay)",
+        card: "var(--surface-1)",
+        elevated: "var(--surface-2)",
+        "bg-elevated": "var(--surface-2)",
       },
       textColor: {
         primary: "var(--text-primary)",
@@ -98,12 +96,35 @@ const config: Config = {
         hover: "var(--border-hover)",
         focus: "var(--border-focus)",
       },
+      ringColor: {
+        DEFAULT: "var(--border-focus)",
+        focus: "var(--border-focus)",
+        "focus-high-contrast": "var(--gold)",
+        "focus-danger": "var(--status-danger)",
+        "focus-emerald": "var(--emerald)",
+      },
+      ringOffsetColor: {
+        DEFAULT: "var(--surface-0)",
+        surface: "var(--surface-1)",
+        elevated: "var(--surface-2)",
+      },
+      ringWidth: {
+        DEFAULT: "2px",
+        focus: "2px",
+        "focus-hc": "3px",
+      },
+      ringOffsetWidth: {
+        DEFAULT: "2px",
+        focus: "2px",
+      },
       // ── Elevation / shadow scale ─────────────────────────────────────────
       boxShadow: {
         "elev-0": "none",
         "elev-1": "var(--shadow-elev-1)",
         "elev-2": "var(--shadow-elev-2)",
         "elev-3": "var(--shadow-elev-3)",
+        "focus-ring": "0 0 0 2px var(--surface-0), 0 0 0 4px var(--border-focus)",
+        "focus-ring-hc": "0 0 0 2px var(--surface-0), 0 0 0 5px var(--gold)",
         // Legacy aliases
         card: "var(--shadow-elev-1)",
         "card-hover": "var(--shadow-elev-2)",

@@ -59,21 +59,46 @@ function Toggle({
   label: string;
   description?: string;
 }) {
+  // Stable IDs derived from the label text so the switch button can reference
+  // its visible label and optional description via aria-labelledby /
+  // aria-describedby rather than a duplicated aria-label string.
+  const baseId = `toggle-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+  const labelId = `${baseId}-label`;
+  const descriptionId = `${baseId}-description`;
+
+  /**
+   * Space is the native toggle key for role="switch" (already handled by the
+   * browser for <button>). We add Enter so users who habitually press Enter to
+   * activate controls also get the expected behaviour.
+   */
+  function handleKeyDown(e: React.KeyboardEvent<HTMLButtonElement>) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      onChange(!checked);
+    }
+  }
+
   return (
     <div className="flex items-center justify-between gap-4">
       <div>
-        <p className="text-sm font-medium text-text-primary">{label}</p>
+        <p id={labelId} className="text-sm font-medium text-text-primary">
+          {label}
+        </p>
         {description && (
-          <p className="text-xs text-text-secondary mt-0.5">{description}</p>
+          <p id={descriptionId} className="text-xs text-text-secondary mt-0.5">
+            {description}
+          </p>
         )}
       </div>
       <button
         type="button"
         role="switch"
-        aria-label={label}
         aria-checked={checked}
+        aria-labelledby={labelId}
+        aria-describedby={description ? descriptionId : undefined}
         onClick={() => onChange(!checked)}
-        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${
+        onKeyDown={handleKeyDown}
+        className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-gold ${
           checked ? "bg-gold" : "bg-bg-elevated"
         }`}
       >

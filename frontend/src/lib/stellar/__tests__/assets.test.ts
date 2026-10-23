@@ -370,6 +370,70 @@ describe("Asset Utilities", () => {
     });
   });
 
+  describe("BigInt precision edge cases (#182)", () => {
+    it("has no floating-point drift on 0.1 + 0.2", () => {
+      // 0.1 = 1_000_000 stroops, 0.2 = 2_000_000 stroops, sum = 3_000_000
+      const stroops01 = amountToStroops("0.1", 7);
+      const stroops02 = amountToStroops("0.2", 7);
+      const sum = (BigInt(stroops01) + BigInt(stroops02)).toString();
+      expect(stroopsToAmount(sum, 7)).toBe("0.3");
+    });
+
+    it("is exact for 19999999.9999999", () => {
+      const amount = "19999999.9999999";
+      const stroops = amountToStroops(amount, 7);
+      expect(stroops).toBe("199999999999999");
+      expect(stroopsToAmount(stroops, 7)).toBe(amount);
+    });
+
+    it("is exact at Int64 max (922337203685.4775807)", () => {
+      const maxStroops = "9223372036854775807";
+      const amount = stroopsToAmount(maxStroops, 7);
+      expect(amount).toBe("922,337,203,685.4775807");
+      // Round-trip back
+      expect(amountToStroops(amount, 7)).toBe(maxStroops);
+    });
+
+    it("handles large whole-number amounts without precision loss", () => {
+      // 123,456,789 tokens = 1_234_567_890_000_000 stroops (7 decimals)
+      const stroops = "1234567890000000";
+      const amount = stroopsToAmount(stroops, 7);
+      expect(amount).toBe("123,456,789");
+      expect(amountToStroops(amount, 7)).toBe(stroops);
+    });
+
+    it("handles zero decimals without crashing", () => {
+      expect(amountToStroops("100", 0)).toBe("100");
+      expect(stroopsToAmount("100", 0)).toBe("100");
+    });
+
+    it("handles very small fractional amounts", () => {
+      // 1 stroop with 7 decimals = 0.0000001
+      expect(stroopsToAmount("1", 7)).toBe("0.0000001");
+      expect(amountToStroops("0.0000001", 7)).toBe("1");
+    });
+
+    it("truncates excess fractional digits (no rounding drift)", () => {
+      const result = amountToStroops("1.99999999", 7);
+      expect(result).toBe("19999999"); // truncated, not rounded to 20000000
+    });
+
+    it("round-trips arbitrary 7-decimal values exactly", () => {
+      const values = [
+        "0.1",
+        "0.2",
+        "0.3",
+        "1.2345678",
+        "999.9999999",
+        "0.0000001",
+        "123456789.1234567",
+      ];
+      for (const v of values) {
+        expect(stroopsToAmount(amountToStroops(v, 7), 7)).toBe(v);
+      }
+    });
+  });
+
   describe("STELLAR_ASSETS configuration", () => {
     it("includes XLM native asset", () => {
       expect(STELLAR_ASSETS.XLM).toBeDefined();

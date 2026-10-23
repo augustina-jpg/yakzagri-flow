@@ -20,6 +20,43 @@ import {
 } from "@/lib/offlineCache";
 
 const DOMAIN = "notifications" as const;
+const LAST_SYNCED_STORAGE_PREFIX = "amana:notifications:last-synced:";
+
+function readPersistedLastSynced(cacheKey: string): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(`${LAST_SYNCED_STORAGE_PREFIX}${cacheKey}`);
+    if (!raw) return null;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function writePersistedLastSynced(cacheKey: string, timestamp: number | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    const key = `${LAST_SYNCED_STORAGE_PREFIX}${cacheKey}`;
+    if (timestamp === null) {
+      window.localStorage.removeItem(key);
+    } else {
+      window.localStorage.setItem(key, String(timestamp));
+    }
+  } catch {
+    // Ignore storage errors in restricted contexts.
+  }
+}
+
+export function formatLastSyncedLabel(timestamp: number | null): string {
+  if (!timestamp) return "Not synced yet — data may be missing";
+  const elapsedMs = Math.max(0, Date.now() - timestamp);
+  if (elapsedMs < 60_000) return "Last synced just now";
+  const mins = Math.floor(elapsedMs / 60_000);
+  if (mins < 60) return `Last synced ${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  return `Last synced ${hrs}h ago`;
+}
 
 export interface UseCachedNotificationsOptions<T> {
   /** API endpoint to fetch, e.g. "/notifications/preferences". */
@@ -33,6 +70,8 @@ export interface UseCachedNotificationsResult<T> {
   isLoading: boolean;
   isStale: boolean;
   cachedAt: number | null;
+  lastSyncedAt: number | null;
+  lastSyncedLabel: string;
   error: string | null;
   refetch: () => void;
   invalidateAndRefetch: () => void;
@@ -46,13 +85,13 @@ export function useCachedNotifications<T>(
   const { token, isAuthenticated } = useAuth();
 
   const initialRead = cacheRead<T>(DOMAIN, cacheKey);
+  const initialTimestamp =
+    initialRead.entry?.cachedAt ?? readPersistedLastSynced(cacheKey);
   const [data, setData] = useState<T | null>(
     initialRead.entry?.data ?? null,
   );
   const [isStale, setIsStale] = useState(initialRead.isStale);
-  const [cachedAt, setCachedAt] = useState<number | null>(
-    initialRead.entry?.cachedAt ?? null,
-  );
+  const [cachedAt, setCachedAt] = useState<number | null>(initialTimestamp);
   const [isLoading, setIsLoading] = useState(initialRead.isMiss);
   const [error, setError] = useState<string | null>(null);
   const fetchingRef = useRef(false);
@@ -65,10 +104,12 @@ export function useCachedNotifications<T>(
 
     try {
       const fresh = await request<T>(endpoint, { token });
+      const now = Date.now();
       cacheWrite(DOMAIN, cacheKey, fresh);
+      writePersistedLastSynced(cacheKey, now);
       setData(fresh);
       setIsStale(false);
-      setCachedAt(Date.now());
+      setCachedAt(now);
     } catch (err) {
       const msg =
         err instanceof ApiError
@@ -91,6 +132,7 @@ export function useCachedNotifications<T>(
       setCachedAt(read.entry.cachedAt);
       setIsLoading(false);
     } else {
+      setCachedAt(readPersistedLastSynced(cacheKey));
       setIsLoading(true);
     }
   }, [cacheKey]);
@@ -105,6 +147,7 @@ export function useCachedNotifications<T>(
 
   const invalidateAndRefetch = useCallback(() => {
     cacheInvalidate(DOMAIN, cacheKey);
+    writePersistedLastSynced(cacheKey, null);
     setData(null);
     setIsLoading(true);
     setIsStale(false);
@@ -112,5 +155,15 @@ export function useCachedNotifications<T>(
     void fetchFresh();
   }, [fetchFresh, cacheKey]);
 
-  return { data, isLoading, isStale, cachedAt, error, refetch, invalidateAndRefetch };
+  return {
+    data,
+    isLoading,
+    isStale,
+    cachedAt,
+    lastSyncedAt: cachedAt,
+    lastSyncedLabel: formatLastSyncedLabel(cachedAt),
+    error,
+    refetch,
+    invalidateAndRefetch,
+  };
 }

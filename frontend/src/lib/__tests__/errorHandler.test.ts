@@ -111,3 +111,89 @@ describe("getErrorInfo — admin operation error codes (#59)", () => {
     expect(info.type).toBe("error");
   });
 });
+
+describe("getErrorInfo — Soroban contract error codes (#188)", () => {
+  it("maps a known contract error code to a friendly message", () => {
+    const error = new ApiError(400, "Error(Contract, #4)", {
+      error: "Error(Contract, #4)",
+    });
+
+    const info = getErrorInfo(error);
+
+    expect(info.message).toBe("Escrow is already funded");
+    expect(info.type).toBe("warning");
+  });
+
+  it("maps an unauthorized release contract error code", () => {
+    const error = new ApiError(400, "Error(Contract, #5)", {
+      error: "Error(Contract, #5)",
+    });
+
+    const info = getErrorInfo(error);
+
+    expect(info.message).toBe("Unauthorized caller for release");
+    expect(info.type).toBe("warning");
+  });
+
+  it("maps an invalid loss ratio contract error code", () => {
+    const error = new ApiError(400, "Error(Contract, #6)", {
+      error: "Error(Contract, #6)",
+    });
+
+    const info = getErrorInfo(error);
+
+    expect(info.message).toBe("Invalid loss ratio");
+    expect(info.type).toBe("warning");
+  });
+
+  it("parses contract errors embedded in ApiError.data", () => {
+    const error = new ApiError(400, "Contract invocation failed", {
+      error: "Contract invocation failed",
+      data: { status: "ERROR", error: "Error(Contract, #4)" },
+    });
+
+    const info = getErrorInfo(error);
+
+    expect(info.message).toBe("Escrow is already funded");
+  });
+
+  it("parses contract errors from a Horizon-style response body", () => {
+    const error = new ApiError(400, "Transaction failed", {
+      extras: {
+        result_codes: {
+          transaction: "tx_failed",
+          operations: ["op_invoke_host_function"],
+        },
+        envelope_xdr: "AAAA...",
+      },
+      detail: "Host function trapped: Error(Contract, #6)",
+    });
+
+    const info = getErrorInfo(error);
+
+    expect(info.message).toBe("Invalid loss ratio");
+  });
+
+  it("falls back to a generic message that preserves the raw code for unknown contract errors", () => {
+    const error = new ApiError(400, "Error(Contract, #999)", {
+      error: "Error(Contract, #999)",
+    });
+
+    const info = getErrorInfo(error);
+
+    expect(info.message).toContain("#999");
+    expect(info.type).toBe("warning");
+  });
+
+  it("still uses the generic HTTP-status fallback for non-contract errors", () => {
+    const error = new ApiError(500, "Something broke", {
+      error: "Something broke",
+    });
+
+    const info = getErrorInfo(error);
+
+    expect(info.title).toBe("Error 500");
+    expect(info.message).toBe("Something broke");
+    expect(info.type).toBe("error");
+  });
+});

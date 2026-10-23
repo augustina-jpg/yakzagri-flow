@@ -49,6 +49,16 @@ describe("StreamClawbackForm", () => {
       />,
     );
 
+  const fillRequiredFields = async (
+    user: ReturnType<typeof userEvent.setup>,
+    amount = "3000",
+  ) => {
+    await user.type(screen.getByLabelText(/clawback amount/i), amount);
+    await user.selectOptions(screen.getByLabelText(/reason code/i), "FRAUD_CONFIRMED");
+    await user.type(screen.getByLabelText(/audit ticket/i), "SEC-1234");
+    await user.type(screen.getByLabelText(/confirmation phrase/i), "stream-abc-123");
+  };
+
   // ── Client-side validation (#57) ─────────────────────────────────────
 
   it("disables the review button while the amount field is empty", () => {
@@ -80,10 +90,49 @@ describe("StreamClawbackForm", () => {
     const user = userEvent.setup();
     renderForm();
 
-    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await fillRequiredFields(user);
 
     expect(screen.queryByText(/cannot exceed|greater than zero|whole number/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /preview clawback/i })).toBeEnabled();
+  });
+
+  // ── Mandatory reason code, audit ticket, confirmation phrase (#213) ──
+
+  it("keeps the review button disabled when the reason code is missing", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await user.type(screen.getByLabelText(/audit ticket/i), "SEC-1234");
+    await user.type(screen.getByLabelText(/confirmation phrase/i), "stream-abc-123");
+
+    expect(screen.getByText(/select a reason code/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /preview clawback/i })).toBeDisabled();
+  });
+
+  it("keeps the review button disabled when the audit ticket reference is missing", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await user.selectOptions(screen.getByLabelText(/reason code/i), "COURT_ORDER");
+    await user.type(screen.getByLabelText(/confirmation phrase/i), "stream-abc-123");
+
+    expect(screen.getByText(/audit ticket reference is required/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /preview clawback/i })).toBeDisabled();
+  });
+
+  it("keeps the review button disabled when the confirmation phrase does not match the stream ID", async () => {
+    const user = userEvent.setup();
+    renderForm();
+
+    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await user.selectOptions(screen.getByLabelText(/reason code/i), "SANCTIONS_COMPLIANCE");
+    await user.type(screen.getByLabelText(/audit ticket/i), "SEC-1234");
+    await user.type(screen.getByLabelText(/confirmation phrase/i), "stream-abc-12");
+
+    expect(screen.getByText(/confirmation phrase must exactly match/i)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /preview clawback/i })).toBeDisabled();
   });
 
   // ── Confirmation modal (#56) ─────────────────────────────────────────
@@ -92,7 +141,7 @@ describe("StreamClawbackForm", () => {
     const user = userEvent.setup();
     renderForm();
 
-    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await fillRequiredFields(user);
     await user.click(screen.getByRole("button", { name: /preview clawback/i }));
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
@@ -105,7 +154,7 @@ describe("StreamClawbackForm", () => {
     const user = userEvent.setup();
     renderForm();
 
-    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await fillRequiredFields(user);
     await user.click(screen.getByRole("button", { name: /preview clawback/i }));
     await user.click(screen.getByRole("button", { name: /^cancel$/i }));
 
@@ -129,7 +178,7 @@ describe("StreamClawbackForm", () => {
 
     renderForm(onPreview);
 
-    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await fillRequiredFields(user);
     await user.click(screen.getByRole("button", { name: /preview clawback/i }));
     await user.click(screen.getByRole("button", { name: /run preview/i }));
 
@@ -158,7 +207,7 @@ describe("StreamClawbackForm", () => {
 
     renderForm();
 
-    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await fillRequiredFields(user);
     await user.click(screen.getByRole("button", { name: /preview clawback/i }));
     await user.click(screen.getByRole("button", { name: /run preview/i }));
 
@@ -180,7 +229,7 @@ describe("StreamClawbackForm", () => {
 
     renderForm();
 
-    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await fillRequiredFields(user);
     await user.click(screen.getByRole("button", { name: /preview clawback/i }));
     await user.click(screen.getByRole("button", { name: /run preview/i }));
 
@@ -199,7 +248,7 @@ describe("StreamClawbackForm", () => {
 
     renderForm();
 
-    await user.type(screen.getByLabelText(/clawback amount/i), "3000");
+    await fillRequiredFields(user);
     await user.click(screen.getByRole("button", { name: /preview clawback/i }));
     await user.click(screen.getByRole("button", { name: /run preview/i }));
 

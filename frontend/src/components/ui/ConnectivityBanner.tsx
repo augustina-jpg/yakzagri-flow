@@ -2,7 +2,7 @@
 import { t as translateCopy } from "@/lib/i18n";
 
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useOffline } from "@/hooks/useOffline";
 import { useOfflineQueueStore } from "@/stores/offlineQueueStore";
 import { useToast } from "@/hooks/useToast";
@@ -14,10 +14,12 @@ import type { CreateTradeRequest } from "@/lib/api";
 export function ConnectivityBanner() {
   const { isOffline, wasOffline, retryOnline } = useOffline();
   const queue = useOfflineQueueStore((s) => s.queue);
+  const dequeue = useOfflineQueueStore((s) => s.dequeue);
   const replay = useOfflineQueueStore((s) => s.replay);
   const setOnline = useOfflineQueueStore((s) => s.setOnline);
   const { token } = useAuth();
   const { addToast, addToastWithCorrelation } = useToast();
+  const [inspectorOpen, setInspectorOpen] = useState(false);
 
   // Sync online state to queue store
   useEffect(() => {
@@ -71,20 +73,72 @@ export function ConnectivityBanner() {
   // Accurate banner states during transition windows
   if (isOffline) {
     return (
-      <div role="status" aria-live="polite" className="fixed top-0 left-0 right-0 z-[100] bg-status-warning text-text-inverse px-4 py-2 text-sm text-center flex items-center justify-center gap-3">
-        <span aria-hidden>●</span>
-        <span>{translateCopy("ui.you_re_offline_actions_will_be_q_7c3cdb0")}</span>
-        {queue.length > 0 && (
-          <span className="bg-white/20 rounded-full px-2 py-0.5 text-xs font-semibold">{queue.length} {translateCopy("ui.pending_e225869")}</span>
+      <>
+        <div role="status" aria-live="polite" className="fixed top-0 left-0 right-0 z-[100] bg-status-warning text-text-inverse px-4 py-2 text-sm text-center flex items-center justify-center gap-3">
+          <span aria-hidden>●</span>
+          <span>{translateCopy("ui.you_re_offline_actions_will_be_q_7c3cdb0")}</span>
+          {queue.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setInspectorOpen((prev) => !prev)}
+              aria-expanded={inspectorOpen}
+              className="bg-white/20 hover:bg-white/30 rounded-full px-2.5 py-0.5 text-xs font-semibold transition-colors"
+            >
+              {queue.length} {translateCopy("ui.pending_e225869")}
+            </button>
+          )}
+          <button
+            onClick={() => void retryOnline()}
+            className="ml-2 underline hover:no-underline focus-visible:outline-2 focus-visible:outline-white rounded px-1"
+            aria-label={translateCopy("ui.retry_connection_a351235")}
+          >
+            {translateCopy("common.retry")}
+          </button>
+        </div>
+
+        {inspectorOpen && queue.length > 0 && (
+          <div
+            role="dialog"
+            aria-label="Offline Queue Inspector"
+            className="fixed top-10 right-4 z-[101] w-full max-w-md rounded-lg border border-border-default bg-bg-elevated p-4 shadow-xl text-left"
+          >
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-text-primary">
+                Queued Offline Actions ({queue.length})
+              </h2>
+              <button
+                type="button"
+                onClick={() => setInspectorOpen(false)}
+                className="text-xs text-text-muted hover:text-text-primary"
+              >
+                Close
+              </button>
+            </div>
+            <ul className="space-y-2 max-h-60 overflow-y-auto">
+              {queue.map((action) => (
+                <li
+                  key={action.id}
+                  className="flex items-center justify-between gap-2 rounded border border-border-default bg-bg-secondary px-3 py-2 text-xs"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="font-medium text-text-primary truncate">{action.label || action.type}</p>
+                    <p className="text-text-muted truncate">
+                      {action.method} {action.endpoint} · Retries: {action.retries}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => dequeue(action.id)}
+                    className="shrink-0 rounded border border-status-danger/30 px-2 py-1 text-status-danger hover:bg-status-danger/10"
+                  >
+                    Cancel
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
-        <button
-          onClick={() => void retryOnline()}
-          className="ml-2 underline hover:no-underline focus-visible:outline-2 focus-visible:outline-white rounded px-1"
-          aria-label={translateCopy("ui.retry_connection_a351235")}
-        >
-          {translateCopy("common.retry")}
-        </button>
-      </div>
+      </>
     );
   }
 

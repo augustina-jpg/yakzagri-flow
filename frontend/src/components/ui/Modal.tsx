@@ -120,16 +120,20 @@ export function ModalContent({
   );
 }
 
+export const MODAL_SPACING = {
+  header: "border-b border-border-default px-6 py-5 pr-14",
+  body: "max-h-[70vh] overflow-y-auto px-6 py-5",
+  footer:
+    "flex flex-col-reverse gap-3 border-t border-border-default dark:border-border-default px-6 py-4 sm:flex-row sm:justify-end",
+} as const;
+
 export function ModalHeader({
   className,
   ...props
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={clsx(
-        "border-b border-border-default px-6 py-5 pr-14",
-        className,
-      )}
+      className={clsx(MODAL_SPACING.header, className)}
       {...props}
     />
   );
@@ -149,7 +153,7 @@ export function ModalDescription(
 ) {
   return (
     <Dialog.Description
-      className={clsx("mt-1 text-sm text-secondary", props.className)}
+      className={clsx("mt-1.5 text-sm text-secondary", props.className)}
       {...props}
     />
   );
@@ -161,7 +165,7 @@ export function ModalBody({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={clsx("max-h-[70vh] overflow-y-auto px-6 py-5", className)}
+      className={clsx(MODAL_SPACING.body, className)}
       {...props}
     />
   );
@@ -173,10 +177,7 @@ export function ModalFooter({
 }: React.HTMLAttributes<HTMLDivElement>) {
   return (
     <div
-      className={clsx(
-        "flex flex-col-reverse gap-2 border-t border-border-default dark:border-border-default px-6 py-4 sm:flex-row sm:justify-end",
-        className
-      )}
+      className={clsx(MODAL_SPACING.footer, className)}
       {...props}
     />
   );

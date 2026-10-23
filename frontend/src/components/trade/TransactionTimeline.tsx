@@ -80,7 +80,7 @@ export function TransactionTimeline({
   const mergedEvents = mergeEvents(events);
 
   return (
-    <div className="bg-card rounded-xl border border-border-default p-6 shadow-card flex flex-col flex-1">
+    <div className="bg-card rounded-xl border border-border-default p-6 shadow-elev-1 flex flex-col flex-1">
       <div className="flex items-center gap-2 mb-5">
         <svg
           className="w-4 h-4 text-gold"

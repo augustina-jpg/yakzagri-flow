@@ -3,6 +3,14 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ClawbackConfirmationModal } from "../ClawbackConfirmationModal";
 
+const baseProps = {
+  streamId: "stream-abc-123",
+  amount: "3000",
+  remainingVested: "7500",
+  reasonCode: "FRAUD_CONFIRMED" as const,
+  auditTicketId: "SEC-4821",
+};
+
 describe("ClawbackConfirmationModal", () => {
   it("is not rendered when closed", () => {
     render(
@@ -37,24 +45,66 @@ describe("ClawbackConfirmationModal", () => {
     expect(screen.getByText("7500")).toBeInTheDocument();
   });
 
-  it("calls onPreview only after the Run preview button is clicked", async () => {
+  it("displays the reason code and audit ticket reference", () => {
+    render(
+      <ClawbackConfirmationModal
+        open
+        {...baseProps}
+        onPreview={jest.fn()}
+        onCancel={jest.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/fraud_confirmed/i)).toBeInTheDocument();
+    expect(screen.getByText("SEC-4821")).toBeInTheDocument();
+  });
+
+  it("keeps Run preview disabled until the confirmation phrase matches the stream id", async () => {
     const user = userEvent.setup();
     const onPreview = jest.fn();
 
     render(
       <ClawbackConfirmationModal
         open
-        streamId="stream-abc-123"
-        amount="3000"
-        remainingVested="7500"
+        {...baseProps}
         onPreview={onPreview}
         onCancel={jest.fn()}
       />,
     );
 
+    const runPreview = screen.getByRole("button", { name: /run preview/i });
+    expect(runPreview).toBeDisabled();
+
+    const input = screen.getByLabelText(/confirmation phrase/i);
+    await user.type(input, "stream-abc-12");
+    expect(runPreview).toBeDisabled();
+
+    await user.type(input, "3");
+    expect(runPreview).toBeEnabled();
+
     expect(onPreview).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: /run preview/i }));
+    await user.click(runPreview);
     expect(onPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a confirmation phrase that does not exactly match the stream id", async () => {
+    const user = userEvent.setup();
+    const onPreview = jest.fn();
+
+    render(
+      <ClawbackConfirmationModal
+        open
+        {...baseProps}
+        onPreview={onPreview}
+        onCancel={jest.fn()}
+      />,
+    );
+
+    const input = screen.getByLabelText(/confirmation phrase/i);
+    await user.type(input, "STREAM-ABC-123");
+
+    expect(screen.getByRole("button", { name: /run preview/i })).toBeDisabled();
+    expect(onPreview).not.toHaveBeenCalled();
   });
 
   it("calls onCancel when Cancel is clicked, without calling onConfirm", async () => {
@@ -65,9 +115,7 @@ describe("ClawbackConfirmationModal", () => {
     render(
       <ClawbackConfirmationModal
         open
-        streamId="stream-abc-123"
-        amount="3000"
-        remainingVested="7500"
+        {...baseProps}
         onPreview={onPreview}
         onCancel={onCancel}
       />,
@@ -85,9 +133,7 @@ describe("ClawbackConfirmationModal", () => {
     render(
       <ClawbackConfirmationModal
         open
-        streamId="stream-abc-123"
-        amount="3000"
-        remainingVested="7500"
+        {...baseProps}
         onPreview={onPreview}
         onCancel={onCancel}
       />,
@@ -102,9 +148,7 @@ describe("ClawbackConfirmationModal", () => {
     render(
       <ClawbackConfirmationModal
         open
-        streamId="stream-abc-123"
-        amount="3000"
-        remainingVested="7500"
+        {...baseProps}
         onPreview={jest.fn()}
         onCancel={jest.fn()}
         previewing

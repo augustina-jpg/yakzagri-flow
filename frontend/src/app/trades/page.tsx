@@ -4,6 +4,7 @@ import { t as translateCopy } from "@/lib/i18n";
 
 import { useState, useEffect, useMemo } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import { useAuth } from "@/hooks/useAuth";
 import { useAnalytics } from "@/components/AnalyticsProvider";
 import { useToast } from "@/hooks/useToast";
@@ -13,6 +14,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { Button } from "@/components/ui/Button";
 import { NavButton } from "@/components/ui/Navigation";
 import { StatusBadge, type TradeStatus as BadgeTradeStatus } from "@/components/ui/StatusBadge";
+import { downloadTradesExport } from "@/lib/exportTrades";
 
 type TradeStatus = "all" | "active" | "pending" | "completed" | "disputed";
 type TradeRole = "all" | "buying" | "selling";
@@ -26,6 +28,22 @@ const FILTERS: { label: string; value: TradeStatus }[] = [
 ];
 
 const PAGE_SIZE = 100;
+
+const STATUS_VALUES: TradeStatus[] = ["all", "active", "pending", "completed", "disputed"];
+const ROLE_VALUES: TradeRole[] = ["all", "buying", "selling"];
+
+function parseStatus(value: string | null): TradeStatus {
+  return STATUS_VALUES.includes(value as TradeStatus) ? (value as TradeStatus) : "all";
+}
+
+function parseRole(value: string | null): TradeRole {
+  return ROLE_VALUES.includes(value as TradeRole) ? (value as TradeRole) : "all";
+}
+
+function parsePage(value: string | null): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
 
 const ROLE_FILTERS: { label: string; value: TradeRole }[] = [
   { label: "All roles", value: "all" },
@@ -86,12 +104,42 @@ export default function TradesPage() {
   const { token, address, isAuthenticated } = useAuth();
   const { trackApiFailure, trackFunnelStep } = useAnalytics();
   const { addToast } = useToast();
-  const [activeFilter, setActiveFilter] = useState<TradeStatus>("all");
-  const [activeRole, setActiveRole] = useState<TradeRole>("all");
-  const [page, setPage] = useState(1);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const [activeFilter, setActiveFilter] = useState<TradeStatus>(() => parseStatus(searchParams.get("status")));
+  const [activeRole, setActiveRole] = useState<TradeRole>(() => parseRole(searchParams.get("role")));
+  const [page, setPage] = useState(() => parsePage(searchParams.get("page")));
   const [trades, setTrades] = useState<TradeResponse[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Keep local filter state in sync with the URL so browser back/forward
+  // navigation restores previous filter states.
+  useEffect(() => {
+    setActiveFilter(parseStatus(searchParams.get("status")));
+    setActiveRole(parseRole(searchParams.get("role")));
+    setPage(parsePage(searchParams.get("page")));
+  }, [searchParams]);
+
+  function updateQuery(next: { status?: TradeStatus; role?: TradeRole; page?: number }) {
+    const params = new URLSearchParams(searchParams.toString());
+    const status = next.status ?? activeFilter;
+    const role = next.role ?? activeRole;
+    const nextPage = next.page ?? page;
+
+    if (status === "all") params.delete("status");
+    else params.set("status", status);
+
+    if (role === "all") params.delete("role");
+    else params.set("role", role);
+
+    if (nextPage <= 1) params.delete("page");
+    else params.set("page", String(nextPage));
+
+    const query = params.toString();
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+  }
 
   useEffect(() => {
     async function fetchTrades() {
@@ -152,11 +200,36 @@ export default function TradesPage() {
   function handleFilter(value: TradeStatus) {
     setActiveFilter(value);
     setPage(1);
+    updateQuery({ status: value, page: 1 });
   }
 
   function handleRoleFilter(value: TradeRole) {
     setActiveRole(value);
     setPage(1);
+    updateQuery({ role: value, page: 1 });
+  }
+
+  function handlePageChange(nextPage: number) {
+    const clamped = Math.min(totalPages, Math.max(1, nextPage));
+    setPage(clamped);
+    updateQuery({ page: clamped });
+  }
+
+  function handleExport(format: "csv" | "json") {
+    const rows = filteredTrades.map((trade) => {
+      const isBuyer = trade.buyerAddress.toLowerCase() === address?.toLowerCase();
+      return {
+        tradeId: trade.tradeId,
+        role: isBuyer ? "buying" : "selling",
+        counterparty: isBuyer ? trade.sellerAddress : trade.buyerAddress,
+        amountCngn: trade.amountCngn,
+        status: trade.status,
+        createdAt: trade.createdAt,
+      };
+    });
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    downloadTradesExport(rows, format, `trades-${timestamp}`);
   }
 
   function formatDate(dateString: string) {
@@ -207,6 +280,20 @@ export default function TradesPage() {
             {translateCopy("ui.info_4b631f6")}
           </button>
         </div>
+        <button
+          type="button"
+          onClick={() => handleExport("csv")}
+          className="px-3 py-1.5 rounded-md border border-border-default text-text-secondary text-xs font-medium hover:border-border-hover transition-colors"
+        >
+          Export CSV
+        </button>
+        <button
+          type="button"
+          onClick={() => handleExport("json")}
+          className="px-3 py-1.5 rounded-md border border-border-default text-text-secondary text-xs font-medium hover:border-border-hover transition-colors"
+        >
+          Export JSON
+        </button>
         <Link href="/trades/create">
           <Button variant="primary">{translateCopy("ui.create_trade_2747e94")}</Button>
         </Link>
@@ -363,14 +450,14 @@ export default function TradesPage() {
               </span>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  onClick={() => handlePageChange(page - 1)}
                   disabled={page === 1}
                   className="px-3 py-1.5 rounded-md border border-border-default hover:border-border-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {translateCopy("ui.previous_50f9428")}
                 </button>
                 <button
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  onClick={() => handlePageChange(page + 1)}
                   disabled={page === totalPages}
                   className="px-3 py-1.5 rounded-md border border-border-default hover:border-border-hover disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >

@@ -11,6 +11,7 @@ import { api, type TradeStatsResponse, type TradeResponse } from "@/lib/api";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { formatNumber } from "@/lib/i18n/format";
 import { Button } from "@/components/ui/Button";
+import { exportTrades, type TradeExportFormat } from "@/lib/exportTrades";
 import {
   TrendingUp,
   Activity,
@@ -261,6 +262,8 @@ function AllocationBar({ trades, loading }: AllocationBarProps) {
 
 // ─── Asset Table ──────────────────────────────────────────────────────────────
 
+export type AssetSortKey = "newest" | "oldest" | "amount-desc" | "amount-asc";
+
 interface AssetTableProps {
   trades: TradeResponse[];
   loading: boolean;
@@ -269,6 +272,10 @@ interface AssetTableProps {
   onPageChange: (p: number) => void;
   search: string;
   onSearchChange: (s: string) => void;
+  counterpartySearch?: string;
+  onCounterpartySearchChange?: (s: string) => void;
+  sortBy?: AssetSortKey;
+  onSortByChange?: (sort: AssetSortKey) => void;
   statusFilter: StatusFilter;
   onStatusFilterChange: (s: StatusFilter) => void;
   onRefresh: () => void;
@@ -300,6 +307,8 @@ function AssetTableSkeleton() {
 function AssetTable({
   trades, loading, page, totalPages,
   onPageChange, search, onSearchChange,
+  counterpartySearch = "", onCounterpartySearchChange,
+  sortBy = "newest", onSortByChange,
   statusFilter, onStatusFilterChange, onRefresh,
 }: AssetTableProps) {
   return (
@@ -308,7 +317,7 @@ function AssetTable({
       <div className="px-6 py-4 border-b border-border-default flex flex-col sm:flex-row sm:items-center gap-3">
         <h2 className="text-sm font-semibold text-text-primary shrink-0">{translateCopy("ui.asset_positions_9582d62")}</h2>
 
-        <div className="flex-1 flex flex-col sm:flex-row gap-2 sm:items-center">
+        <div className="flex-1 flex flex-col sm:flex-row gap-2 sm:items-center flex-wrap">
           {/* Search */}
           <div className="relative flex-1 max-w-xs">
             <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-text-muted pointer-events-none" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
@@ -321,6 +330,35 @@ function AssetTable({
               aria-label={translateCopy("ui.search_assets_5d5a0ea")}
             />
           </div>
+
+          {onCounterpartySearchChange && (
+            <input
+              type="search"
+              placeholder="Filter by counterparty…"
+              value={counterpartySearch}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => onCounterpartySearchChange(e.target.value)}
+              className="px-3 py-1.5 text-xs bg-surface-2 border border-border-default rounded-lg text-text-primary placeholder:text-text-muted focus:outline-none focus:border-gold/50 transition-colors"
+              aria-label="Search by counterparty address"
+              data-testid="assets-counterparty-search"
+            />
+          )}
+
+          {onSortByChange && (
+            <select
+              value={sortBy}
+              onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+                onSortByChange(e.target.value as AssetSortKey)
+              }
+              aria-label="Sort assets"
+              data-testid="assets-sort-select"
+              className="px-2.5 py-1.5 text-xs bg-surface-2 border border-border-default rounded-lg text-text-primary focus:outline-none focus:border-gold/50"
+            >
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="amount-desc">Amount: High to Low</option>
+              <option value="amount-asc">Amount: Low to High</option>
+            </select>
+          )}
 
           {/* Status filters */}
           <div className="flex gap-1 flex-wrap" role="group" aria-label={translateCopy("ui.filter_by_status_f43653d")}>
@@ -521,6 +559,8 @@ export default function AssetsPage() {
   // Table state
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
+  const [counterpartySearch, setCounterpartySearch] = useState("");
+  const [sortBy, setSortBy] = useState<AssetSortKey>("newest");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const fetchData = useCallback(async () => {
@@ -551,10 +591,10 @@ export default function AssetsPage() {
   // Reset to page 1 when filters change
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter]);
+  }, [search, counterpartySearch, sortBy, statusFilter]);
   // Filter trades client-side
   const filteredTrades = useMemo(() => {
-    let result = allTrades;
+    let result = [...allTrades];
 
     if (statusFilter !== "all") {
       result = result.filter((t: TradeResponse) => {
@@ -577,11 +617,39 @@ export default function AssetsPage() {
       );
     }
 
+    if (counterpartySearch.trim()) {
+      const cq = counterpartySearch.trim().toLowerCase();
+      result = result.filter(
+        (t: TradeResponse) =>
+          t.sellerAddress.toLowerCase().includes(cq) ||
+          t.buyerAddress.toLowerCase().includes(cq),
+      );
+    }
+
+    result.sort((a, b) => {
+      if (sortBy === "amount-desc") {
+        return parseFloat(b.amountCngn || "0") - parseFloat(a.amountCngn || "0");
+      }
+      if (sortBy === "amount-asc") {
+        return parseFloat(a.amountCngn || "0") - parseFloat(b.amountCngn || "0");
+      }
+      const timeA = Date.parse(a.createdAt) || 0;
+      const timeB = Date.parse(b.createdAt) || 0;
+      return sortBy === "oldest" ? timeA - timeB : timeB - timeA;
+    });
+
     return result;
-  }, [allTrades, statusFilter, search]);
+  }, [allTrades, statusFilter, search, counterpartySearch, sortBy]);
 
   const totalPages = Math.max(1, Math.ceil(filteredTrades.length / PAGE_SIZE));
   const pagedTrades = filteredTrades.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const handleExport = useCallback(
+    (format: TradeExportFormat) => {
+      exportTrades(filteredTrades, format, "assets");
+    },
+    [filteredTrades],
+  );
 
   // Derived summary values
   const totalVolume = stats?.totalVolume ?? 0;
@@ -608,9 +676,31 @@ export default function AssetsPage() {
             <p className="text-xs text-text-muted">{translateCopy("ui.your_cngn_backed_trade_positions_71149a7")}</p>
           </div>
           {isAuthenticated && (
-            <Link href="/trades/create">
-              <Button variant="primary" className="text-xs">{translateCopy("ui.new_asset_23ebdb4")}</Button>
-            </Link>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="secondary"
+                className="text-xs"
+                onClick={() => handleExport("csv")}
+                disabled={loading || filteredTrades.length === 0}
+                aria-label={translateCopy("ui.export_assets_csv_2f4b1a7")}
+              >
+                {translateCopy("ui.export_csv_5c1d9e2")}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                className="text-xs"
+                onClick={() => handleExport("json")}
+                disabled={loading || filteredTrades.length === 0}
+                aria-label={translateCopy("ui.export_assets_json_8a3c6d1")}
+              >
+                {translateCopy("ui.export_json_7b2e4f0")}
+              </Button>
+              <Link href="/trades/create">
+                <Button variant="primary" className="text-xs">{translateCopy("ui.new_asset_23ebdb4")}</Button>
+              </Link>
+            </div>
           )}
         </div>
 
@@ -687,7 +777,7 @@ export default function AssetsPage() {
 
             {/* Asset table */}
             <AssetTable
-              key={`${search}-${statusFilter}`}
+              key={`${search}-${counterpartySearch}-${sortBy}-${statusFilter}`}
               trades={pagedTrades}
               loading={loading && allTrades.length === 0}
               page={page}
@@ -695,6 +785,10 @@ export default function AssetsPage() {
               onPageChange={setPage}
               search={search}
               onSearchChange={setSearch}
+              counterpartySearch={counterpartySearch}
+              onCounterpartySearchChange={setCounterpartySearch}
+              sortBy={sortBy}
+              onSortByChange={setSortBy}
               statusFilter={statusFilter}
               onStatusFilterChange={setStatusFilter}
               onRefresh={fetchData}

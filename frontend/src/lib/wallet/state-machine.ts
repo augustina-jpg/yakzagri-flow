@@ -173,11 +173,19 @@ export function describeWalletState(
         ctaLabel: null,
         action: null,
       };
+    case "detecting":
+      return {
+        state,
+        title: t("wallet.detectingTitle"),
+        body: t("wallet.detectingBody"),
+        ctaLabel: null,
+        action: null,
+      };
     case "connected":
       return {
         state,
-        title: t("wallet.connect"),
-        body: "",
+        title: t("wallet.connectedTitle"),
+        body: t("wallet.connectedBody"),
         ctaLabel: null,
         action: null,
       };
@@ -185,7 +193,7 @@ export function describeWalletState(
       return {
         state,
         title: t("wallet.connect"),
-        body: "",
+        body: t("wallet.idleBody"),
         ctaLabel: t("wallet.connect"),
         action: "connect",
       };

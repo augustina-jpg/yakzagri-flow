@@ -4,7 +4,7 @@ import { t as translateCopy } from "@/lib/i18n";
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTrade } from "../TradeContext";
-import { isSelfEscrowAddress, isValidStellarAddress } from "../validation";
+import { isSelfEscrowAddress, isValidStellarAddress, formatDeliveryWindowSummary } from "../validation";
 import { useAuth } from "@/hooks/useAuth";
 import { submitTradeCreation } from "@/lib/trades/submitTradeCreation";
 import { createTradeInputSchema, fieldErrors } from "@/lib/domain-schemas/trade";
@@ -17,6 +17,7 @@ import { shouldDedup, registerAction } from "@/lib/actionDedup";
 import { getOrCreateIdempotencyKey, clearIdempotencyKey } from "@/lib/idempotency";
 import { generateCorrelationId } from "@/lib/correlationId";
 import { formatNumber } from "@/lib/i18n/format";
+import { XdrCountdownBadge } from "@/components/trades/XdrCountdownBadge";
 
 export const SLIPPAGE_TOLERANCE_OPTIONS = [
   { label: "0.5%", value: 0.5, bps: 50 },
@@ -51,6 +52,12 @@ export function estimateSorobanSimulation(rawAmount: number): SorobanSimulationB
 }
 
 type Row = { label: string; value: string };
+type CompletedTrade = { tradeId: string; transactionHash: string };
+type Step3ReviewProps = {
+  onCreated?: (trade: CompletedTrade) => void;
+  completedTrade?: CompletedTrade;
+  onStartNewTrade?: () => void;
+};
 
 function ReviewRow({ label, value }: Row) {
   return (
@@ -61,7 +68,7 @@ function ReviewRow({ label, value }: Row) {
   );
 }
 
-export function Step3Review() {
+export function Step3Review({ onCreated, completedTrade, onStartNewTrade }: Step3ReviewProps) {
   const router = useRouter();
   const { data, setStep } = useTrade();
   const { token, address, isAuthenticated, isWalletConnected, connectWallet, authenticate } = useAuth();
@@ -76,12 +83,33 @@ export function Step3Review() {
   const [error, setError] = useState<string | null>(null);
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [slippageTolerance, setSlippageTolerance] = useState<number>(0.5);
+  // Prepared unsigned XDR + its ledger timebounds (maxTime, unix seconds).
+  // Populated once the backend prepares the transaction; drives the expiry countdown.
+  const [preparedXdr, setPreparedXdr] = useState<string | null>(null);
+  const [xdrMaxTime, setXdrMaxTime] = useState<number | null>(null);
+  const [xdrExpired, setXdrExpired] = useState(false);
+  const [refreshingXdr, setRefreshingXdr] = useState(false);
 
   const qty = parseFloat(data.quantity);
   const price = parseFloat(data.pricePerUnit);
   const rawAmount = !isNaN(qty) && !isNaN(price) ? qty * price : NaN;
 
   const total = !isNaN(rawAmount) && rawAmount > 0 ? formatNumber(rawAmount) : "—";
+
+  // Unit price derived from the structured quantity/unit breakdown. Guard
+  // against zero/NaN quantity so we never divide by zero.
+  const computedUnitPrice =
+    !isNaN(rawAmount) && rawAmount > 0 && !isNaN(qty) && qty > 0
+      ? rawAmount / qty
+      : NaN;
+  const unitPriceDisplay =
+    !isNaN(computedUnitPrice) && computedUnitPrice > 0
+      ? formatNumber(computedUnitPrice)
+      : "—";
+  const quantityDisplay = data.quantity
+    ? `${data.quantity}${data.unit ? ` ${data.unit}` : ""}`
+    : "—";
+======
 
   const amountUsdc = !isNaN(rawAmount) && rawAmount > 0 ? rawAmount.toFixed(7) : "0";
   const maxSlippageAmount =
@@ -106,6 +134,24 @@ export function Step3Review() {
   const handleDisclaimerAccept = () => {
     setShowDisclaimer(false);
     void handleSubmit();
+  };
+
+  // Re-fetches the prepared unsigned XDR (re-running the prepare flow) and
+  // resets the countdown so the user can sign a fresh transaction.
+  const handleRefreshXdr = async () => {
+    if (refreshingXdr) return;
+    setRefreshingXdr(true);
+    setError(null);
+    try {
+      const refreshed = await prepareTradeXdr();
+      setPreparedXdr(refreshed.xdr);
+      setXdrMaxTime(refreshed.maxTime);
+      setXdrExpired(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to refresh transaction");
+    } finally {
+      setRefreshingXdr(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -143,55 +189,51 @@ export function Step3Review() {
       return;
     }
 
-    const requestPayload = {
-      sellerAddress: parsed.data.sellerAddress,
-      amountUsdc: parsed.data.amountUsdc,
-      buyerLossBps,
-      sellerLossBps,
-    };
-
-    const correlationId = generateCorrelationId();
-    const idempotencyKey = getOrCreateIdempotencyKey(address, dedupKey);
-    registerAction(dedupKey, correlationId, idempotencyKey);
-
-    // Offline queue: queue idempotent action locally while offline (draft trades survive refresh)
-    if (isOffline) {
-      enqueue({
-        type: "create-trade",
-        endpoint: "/trades",
-        method: "POST",
-        body: requestPayload,
-        idempotencyKey,
-        correlationId,
-      });
-      // Pending-state UX showing what will send
-      addToastWithCorrelation({
-        type: "info",
-        title: "Queued offline",
-        message: `Draft trade (${data.commodity} ${amountUsdc} cNGN) will send when reconnected.`,
-        correlationId,
-        duration: 6000,
-      });
-      // Keep draft in localStorage (TradeContext) — survives refresh/restart via TradeContext persistence
-      setError(null);
-      return;
-    }
-
-    submittingRef.current = true;
-    setLoading(true);
-    setError(null);
-    // Unified toast contract: pending w/ correlation ID
-    addToastWithCorrelation({ type: "info", title: "In progress", message: "Locking funds…", correlationId, duration: 0 });
-
     try {
-      const submission = await submitTradeCreation(token, requestPayload, {
-        idempotencyKey,
-        correlationId,
-      });
+      // Action de-duplication window preventing double-submit (rapid triple-click yields single intent)
+      const dedupKey = `create-trade:${data.sellerAddress}:${amountUsdc}:${buyerLossBps}`;
+      const dedup = shouldDedup(dedupKey);
+      if (dedup.dedup) return;
+      if (!isAuthenticated || !token) {
+        setError("Please connect and authenticate your wallet first.");
+        return;
+      }
+
+      if (!isFormValid) {
+        setError("Please complete all required fields with valid values before submitting.");
+        return;
+      }
+
+      // Validate against the shared domain schema — same rules the backend
+      // enforces — so we never fire a request the server will reject with a 400.
+      const payload = {
+        sellerAddress: data.sellerAddress.trim(),
+        amountUsdc,
+        buyerLossBps,
+        sellerLossBps,
+      };
+      const parsed = createTradeInputSchema.safeParse(payload);
+      if (!parsed.success) {
+        const errs = fieldErrors(parsed.error);
+        setError(errs._form ?? Object.values(errs)[0] ?? "Trade details are invalid.");
+        return;
+      }
+
+      const requestPayload = {
+        sellerAddress: parsed.data.sellerAddress,
+        amountUsdc: parsed.data.amountUsdc,
+        buyerLossBps,
+        sellerLossBps,
+      };
+
+      const correlationId = generateCorrelationId();
+      const idempotencyKey = getOrCreateIdempotencyKey(address, dedupKey);
+      registerAction(dedupKey, correlationId, idempotencyKey);
 
       clearIdempotencyKey(address, dedupKey);
       setTradeId(submission.tradeId);
       setTxHash(submission.transactionHash);
+      onCreated?.({ tradeId: submission.tradeId, transactionHash: submission.transactionHash });
       updateToast(correlationId, { type: "success", title: "Success", message: "Trade created — funds locked.", duration: 5000 });
       // Clear draft on success
       try { localStorage.removeItem("amana:draft-trade"); } catch {}
@@ -205,17 +247,62 @@ export function Step3Review() {
           idempotencyKey,
           correlationId,
         });
-        router.push('/trades/queue');
+        // Pending-state UX showing what will send
+        addToastWithCorrelation({
+          type: "info",
+          title: "Queued offline",
+          message: `Draft trade (${data.commodity} ${amountUsdc} cNGN) will send when reconnected.`,
+          correlationId,
+          duration: 6000,
+        });
+        // Keep draft in localStorage (TradeContext) — survives refresh/restart via TradeContext persistence
+        setError(null);
         return;
       }
-      setError(err instanceof Error ? err.message : 'Failed to submit trade');
+
+      setLoading(true);
+      setError(null);
+      // Unified toast contract: pending w/ correlation ID
+      addToastWithCorrelation({ type: "info", title: "In progress", message: "Locking funds…", correlationId, duration: 0 });
+
+      try {
+        const submission = await submitTradeCreation(token, requestPayload, {
+          idempotencyKey,
+          correlationId,
+        });
+
+        clearIdempotencyKey(address, dedupKey);
+        setTradeId(submission.tradeId);
+        setTxHash(submission.transactionHash);
+        updateToast(correlationId, { type: "success", title: "Success", message: "Trade created — funds locked.", duration: 5000 });
+        // Clear draft on success
+        try { localStorage.removeItem("amana:draft-trade"); } catch {}
+      } catch (err) {
+        if (!navigator.onLine) {
+          enqueue({
+            type: "create-trade",
+            endpoint: "/trades",
+            method: "POST",
+            body: requestPayload,
+            idempotencyKey,
+            correlationId,
+          });
+          router.push('/trades/queue');
+          return;
+        }
+        setError(err instanceof Error ? err.message : 'Failed to submit trade');
+      } finally {
+        setLoading(false);
+      }
     } finally {
       submittingRef.current = false;
-      setLoading(false);
     }
   };
 
-  if (tradeId && txHash) {
+  const displayedTradeId = completedTrade?.tradeId ?? tradeId;
+  const displayedTxHash = completedTrade?.transactionHash ?? txHash;
+
+  if (displayedTradeId && displayedTxHash) {
     return (
     <div className="step-review">
       <h2>{translateCopy("ui.review_trade_56119c6")}</h2>
@@ -227,14 +314,14 @@ export function Step3Review() {
         </div>
         <div className="w-full rounded-lg bg-bg-elevated border border-border-default px-4 py-3 text-left">
           <p className="text-xs text-text-muted mb-1">{translateCopy("ui.trade_id_153d513")}</p>
-          <p className="text-emerald font-mono text-sm break-all">{tradeId}</p>
+          <p className="text-emerald font-mono text-sm break-all">{displayedTradeId}</p>
         </div>
         <div className="w-full rounded-lg bg-bg-elevated border border-border-default px-4 py-3 text-left">
           <p className="text-xs text-text-muted mb-1">{translateCopy("ui.transaction_hash_7534364")}</p>
-          <p className="text-emerald font-mono text-sm break-all">{txHash}</p>
+          <p className="text-emerald font-mono text-sm break-all">{displayedTxHash}</p>
         </div>
         <button
-          onClick={() => router.push(`/trades/${tradeId}`)}
+          onClick={() => router.push(`/trades/${displayedTradeId}`)}
           className="h-12 w-full flex items-center justify-center rounded-full bg-gradient-gold-cta text-text-inverse font-semibold"
         >
           {translateCopy("ui.view_trade_details_c527f5b")}
@@ -245,6 +332,15 @@ export function Step3Review() {
         >
           {translateCopy("ui.view_all_trades_20304ec")}
         </Link>
+        {onStartNewTrade && (
+          <button
+            type="button"
+            onClick={onStartNewTrade}
+            className="text-sm text-text-secondary hover:text-text-primary"
+          >
+            {translateCopy("ui.start_new_trade")}
+          </button>
+        )}
       </div>
       </div>
     );
@@ -287,13 +383,18 @@ export function Step3Review() {
     <div className="flex flex-col gap-6">
       <div className="rounded-lg bg-bg-elevated border border-border-default px-4 divide-y divide-border-default">
         <ReviewRow label="Commodity" value={data.commodity} />
-        <ReviewRow label="Quantity" value={`${data.quantity} ${data.unit}`} />
+        <ReviewRow label="Quantity" value={quantityDisplay} />
+        <ReviewRow label="Unit Price (auto)" value={`${data.currency} ${unitPriceDisplay}`} />
         <ReviewRow label="Price per unit" value={`${data.currency} ${data.pricePerUnit}`} />
         <ReviewRow label="Total Value" value={`${data.currency} ${total}`} />
         <ReviewRow label="USDC Amount" value={`${amountUsdc} cNGN`} />
         <ReviewRow label="Seller Address" value={data.sellerAddress} />
         <ReviewRow label="Loss Ratio" value={`Buyer ${data.buyerRatio}% / Seller ${data.sellerRatio}%`} />
         <ReviewRow label="Delivery Window" value={`${data.deliveryDays} days`} />
+        <ReviewRow
+          label="Delivery Deadline"
+          value={formatDeliveryWindowSummary(data.deliveryDeadline)}
+        />
         {data.notes && <ReviewRow label="Notes" value={data.notes} />}
       </div>
 
@@ -345,6 +446,13 @@ export function Step3Review() {
         </p>
       )}
 
+      {preparedXdr && xdrMaxTime !== null && (
+        <XdrCountdownBadge
+          maxTime={xdrMaxTime}
+          onExpire={() => setXdrExpired(true)}
+        />
+      )}
+
       <div className="rounded-lg bg-gold-muted border border-gold/20 px-4 py-3 text-sm text-gold">
         {translateCopy("ui.by_submitting_you_authorize_a_st_2a21969")}{" "}{amountUsdc} {translateCopy("ui.cngn_in_the_amana_escrow_contrac_539a265")}
       </div>
@@ -367,23 +475,43 @@ export function Step3Review() {
         >
           {translateCopy("common.back")}
         </button>
-        <button
-          disabled={loading || !isFormValid}
-          onClick={() => setShowDisclaimer(true)}
-          className="flex-1 h-12 rounded-full bg-gradient-gold-cta text-text-inverse font-semibold disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-        >
-          {loading ? (
-            <>
-              <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-                <path d="M12 2a10 10 0 0 1 10 10" />
-              </svg>
-              {translateCopy("ui.creating_trade_776cf21")}
-            </>
-          ) : (
-            translateCopy("ui.lock_funds_create_trade")
-          )}
-        </button>
+        {xdrExpired ? (
+          <button
+            disabled={refreshingXdr}
+            onClick={() => void handleRefreshXdr()}
+            className="flex-1 h-12 rounded-full bg-gradient-gold-cta text-text-inverse font-semibold disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {refreshingXdr ? (
+              <>
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" />
+                </svg>
+                Refreshing…
+              </>
+            ) : (
+              "Refresh Quote / XDR"
+            )}
+          </button>
+        ) : (
+          <button
+            disabled={loading || !isFormValid}
+            onClick={() => setShowDisclaimer(true)}
+            className="flex-1 h-12 rounded-full bg-gradient-gold-cta text-text-inverse font-semibold disabled:opacity-60 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
+                  <path d="M12 2a10 10 0 0 1 10 10" />
+                </svg>
+                {translateCopy("ui.creating_trade_776cf21")}
+              </>
+            ) : (
+              translateCopy("ui.lock_funds_create_trade")
+            )}
+          </button>
+        )}
       </div>
       <LegalDisclaimerModal
         isOpen={showDisclaimer}
