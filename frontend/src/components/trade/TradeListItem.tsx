@@ -14,6 +14,8 @@ export interface TradeListItemProps {
   amountCngn: string;
   status: TradeStatus;
   createdAt: string;
+  isOptimisticPending?: boolean;
+  pendingMutationLabel?: string;
   onView: () => void;
   onDeposit?: () => void;
   onWithdraw?: () => void;
@@ -31,24 +33,47 @@ export function TradeListItem({
   amountCngn,
   status,
   createdAt,
+  isOptimisticPending = false,
+  pendingMutationLabel = "Syncing…",
   onView,
   onDeposit,
   onWithdraw,
 }: TradeListItemProps) {
   return (
     <div
-      className="flex items-center justify-between p-4 bg-card border border-border-default rounded-lg mb-3 hover:border-gold/30 hover:bg-elevated transition-colors group"
+      data-testid={`trade-card-${tradeId}`}
+      aria-busy={isOptimisticPending}
+      className={`flex items-center justify-between p-4 bg-card border rounded-lg mb-3 hover:border-gold/30 hover:bg-elevated transition-colors group ${
+        isOptimisticPending
+          ? "border-gold/50 bg-gold/5 animate-pulse"
+          : "border-border-default"
+      }`}
     >
       {/* Left — commodity + meta */}
       <div className="flex flex-col gap-1 min-w-0">
-        <button
-          type="button"
-          onClick={onView}
-          aria-label={`View trade ${tradeId} — ${commodity} ${amountCngn} cNGN, status ${status}`}
-          className="text-left text-lg font-medium text-text-primary truncate focus-visible:outline-2 focus-visible:outline-gold focus-visible:outline-offset-2"
-        >
-          {commodity}
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={onView}
+            aria-label={`View trade ${tradeId} — ${commodity} ${amountCngn} cNGN, status ${status}`}
+            className="text-left text-lg font-medium text-text-primary truncate focus-visible:outline-2 focus-visible:outline-gold focus-visible:outline-offset-2"
+          >
+            {commodity}
+          </button>
+          {isOptimisticPending && (
+            <span
+              role="status"
+              data-testid={`trade-optimistic-indicator-${tradeId}`}
+              className="inline-flex items-center gap-1.5 rounded-full border border-gold/40 bg-gold/10 px-2 py-0.5 text-[11px] font-medium text-gold"
+            >
+              <span
+                aria-hidden="true"
+                className="h-1.5 w-1.5 rounded-full bg-gold animate-ping"
+              />
+              {pendingMutationLabel}
+            </span>
+          )}
+        </div>
 
         <div className="flex items-center gap-2 flex-wrap">
           <span className="bg-white/5 text-teal text-xs px-2 py-1 rounded">

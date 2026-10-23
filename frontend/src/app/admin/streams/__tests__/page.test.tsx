@@ -164,4 +164,102 @@ describe("AdminStreamsPage", () => {
       expect(screen.getByText("No streams to display")).toBeInTheDocument();
     });
   });
+
+  it("shows a progress bar, percentage remaining, and estimated completion date for each stream", async () => {
+    mockList.mockResolvedValueOnce({
+      items: [makeStream()],
+      pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+
+    render(<AdminStreamsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("stream-abc-123")).toBeInTheDocument();
+    });
+
+    const progressBar = screen.getByRole("progressbar");
+    expect(progressBar).toBeInTheDocument();
+    expect(progressBar).toHaveAttribute("aria-valuenow", "75");
+    expect(screen.getByText("75% remaining")).toBeInTheDocument();
+    expect(screen.getByText(/Est\. completion/)).toBeInTheDocument();
+  });
+
+  it("highlights a stream with less than 10% remaining with a Near Depletion badge", async () => {
+    mockList.mockResolvedValueOnce({
+      items: [makeStream({ totalVested: "10000", claimed: "9500", unclaimed: "500" })],
+      pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+
+    render(<AdminStreamsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("stream-abc-123")).toBeInTheDocument();
+    });
+
+    const badge = screen.getByText("Near Depletion <10%");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute("data-health", "near-depletion");
+    expect(screen.getByText("5% remaining")).toBeInTheDocument();
+    expect(screen.getByTestId("stream-row-stream-abc-123")).toHaveAttribute(
+      "data-health",
+      "near-depletion",
+    );
+  });
+
+  it("shows a Streaming badge for an actively vesting stream", async () => {
+    mockList.mockResolvedValueOnce({
+      items: [makeStream()],
+      pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+
+    render(<AdminStreamsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("stream-abc-123")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("Streaming")).toBeInTheDocument();
+  });
+
+  it("shows a Completed badge for a fully claimed stream", async () => {
+    mockList.mockResolvedValueOnce({
+      items: [
+        makeStream({
+          status: "COMPLETED",
+          vestingState: "fully_vested",
+          claimed: "10000",
+          unclaimed: "0",
+        }),
+      ],
+      pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+
+    render(<AdminStreamsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("stream-abc-123")).toBeInTheDocument();
+    });
+
+    const badge = screen.getByText("Completed");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute("data-health", "completed");
+    expect(screen.getByText("0% remaining")).toBeInTheDocument();
+  });
+
+  it("shows a Paused badge for a paused stream", async () => {
+    mockList.mockResolvedValueOnce({
+      items: [makeStream({ status: "PAUSED" })],
+      pagination: { page: 1, limit: 20, total: 1, totalPages: 1 },
+    });
+
+    render(<AdminStreamsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByText("stream-abc-123")).toBeInTheDocument();
+    });
+
+    const badge = screen.getByText("Paused");
+    expect(badge).toBeInTheDocument();
+    expect(badge).toHaveAttribute("data-health", "paused");
+  });
 });

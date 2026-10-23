@@ -57,6 +57,34 @@ export function webUrlForTrade(tradeId: string): string {
   return `${WEB_ORIGIN}/trades/${encodeURIComponent(tradeId)}`;
 }
 
+/** Stellar network the frontend is configured against. */
+export type StellarNetwork = "testnet" | "mainnet";
+
+const STELLAR_EXPLORER_BASE: Record<StellarNetwork, string> = {
+  testnet: "https://stellar.expert/explorer/testnet",
+  mainnet: "https://stellar.expert/explorer/public",
+};
+
+/**
+ * Resolve the active Stellar network from the public env var
+ * (`NEXT_PUBLIC_STELLAR_NETWORK`), defaulting to testnet.
+ */
+export function stellarNetwork(): StellarNetwork {
+  const raw = (process.env.NEXT_PUBLIC_STELLAR_NETWORK ?? "").trim().toLowerCase();
+  return raw === "mainnet" || raw === "public" ? "mainnet" : "testnet";
+}
+
+/**
+ * Explorer URL for a Stellar transaction hash, so the trade detail page can
+ * render a clickable link once a Soroban transaction is confirmed.
+ */
+export function stellarExplorerTxUrl(
+  hash: string,
+  network: StellarNetwork = stellarNetwork(),
+): string {
+  return `${STELLAR_EXPLORER_BASE[network]}/tx/${encodeURIComponent(hash)}`;
+}
+
 /** Deep (custom-scheme) URL for the current web path, or null if not mappable. */
 export function appUrlForPath(pathname: string): string | null {
   for (const route of ROUTES) {
@@ -69,4 +97,59 @@ export function appUrlForPath(pathname: string): string | null {
 /** Which app screen a web path corresponds to (null = not a deep-linkable page). */
 export function screenForPath(pathname: string): DeepLinkScreen | null {
   return ROUTES.find((r) => r.match.test(pathname))?.screen ?? null;
+}
+
+/**
+ * Whether the app is running in a development environment. Read lazily so the
+ * check reflects the current runtime (and stays testable via env stubs).
+ */
+function isDevEnvironment(): boolean {
+  try {
+    const env = (import.meta as { env?: Record<string, string | undefined> }).env;
+    return env?.MODE === "development" || env?.DEV === "true";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Sanitize an external URL so it is safe to use as an `href`.
+ *
+ * Only `https://` URLs are permitted. In development, `http://localhost`
+ * (and `http://127.0.0.1`) are also allowed for local tooling. Everything
+ * else — including `javascript:`, `data:`, `vbscript:`, `file:`, and any
+ * obfuscated variants (mixed case, embedded whitespace/control characters,
+ * leading/trailing junk) — is rejected.
+ *
+ * Returns the normalized URL string when allowed, or `null` when rejected.
+ */
+export function sanitizeExternalUrl(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string") return null;
+
+  // Strip leading/trailing whitespace and any embedded control characters
+  // (e.g. "java\tscript:", "java\nscript:") that browsers may ignore.
+  const trimmed = raw.trim().replace(/[\u0000-\u001F\u007F\s]+/g, "");
+  if (!trimmed) return null;
+
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  const protocol = parsed.protocol.toLowerCase();
+
+  if (protocol === "https:") {
+    return parsed.toString();
+  }
+
+  if (protocol === "http:" && isDevEnvironment()) {
+    const host = parsed.hostname.toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "[::1]") {
+      return parsed.toString();
+    }
+  }
+
+  return null;
 }

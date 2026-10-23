@@ -24,7 +24,8 @@ export function BentoCard({
   return (
     <div
       className={[
-        "bg-surface-1",
+        "bg-surface-card",
+        "dark:bg-surface-1",
         "border border-border-default",
         "rounded-2xl",
         "p-6",

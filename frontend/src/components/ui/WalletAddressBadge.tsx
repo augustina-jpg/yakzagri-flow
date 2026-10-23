@@ -2,8 +2,9 @@
 import { t as translateCopy } from "@/lib/i18n";
 
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Clipboard, ExternalLink } from "lucide-react";
+import { getStellarExpertAccountUrl } from "@/lib/links";
 
 export interface WalletAddressBadgeProps {
   address: string;
@@ -43,16 +44,36 @@ export function WalletAddressBadge({
   className,
 }: WalletAddressBadgeProps) {
   const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const displayAddress = useMemo(
     () => truncateAddress(address, truncate),
     [address, truncate],
   );
 
+  const explorerUrl = useMemo(
+    () => getStellarExpertAccountUrl(address, explorerNetwork),
+    [address, explorerNetwork],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+    };
+  }, []);
+
   const onCopy = async () => {
     try {
       await navigator.clipboard.writeText(address);
       setCopied(true);
-      setTimeout(() => setCopied(false), 1200);
+      if (resetTimerRef.current) {
+        clearTimeout(resetTimerRef.current);
+      }
+      resetTimerRef.current = setTimeout(() => {
+        setCopied(false);
+        resetTimerRef.current = null;
+      }, 2000);
     } catch {
       setCopied(false);
     }
@@ -60,9 +81,13 @@ export function WalletAddressBadge({
 
   return (
     <div
-      className={`group bg-elevated border border-border-default rounded-md px-2 py-1 font-mono text-sm inline-flex items-center gap-1.5 ${className ?? ""}`}
+      className={`group bg-surface-elevated border border-border-default rounded-md px-2 py-1 font-mono text-sm inline-flex items-center gap-1.5 ${className ?? ""}`}
     >
       <span className="text-text-secondary">{displayAddress}</span>
+
+      <span aria-live="polite" className="sr-only">
+        {copied ? "Address copied to clipboard" : ""}
+      </span>
 
       {showCopy && (
         <button
@@ -82,7 +107,7 @@ export function WalletAddressBadge({
 
       {showExplorer && (
         <a
-          href={`https://stellar.expert/explorer/${explorerNetwork}/account/${address}`}
+          href={explorerUrl}
           target="_blank"
           rel="noopener noreferrer"
           className="opacity-0 group-hover:opacity-100 transition-opacity text-text-muted hover:text-gold"

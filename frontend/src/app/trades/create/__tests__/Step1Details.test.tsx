@@ -108,6 +108,7 @@ describe('Step1Details', () => {
             expect(options).toContain('tonnes');
             expect(options).toContain('bags (50kg)');
             expect(options).toContain('bags (100kg)');
+            expect(options).toContain('crates');
         });
 
         it('should update unit when selected', async () => {
@@ -139,6 +140,45 @@ describe('Step1Details', () => {
             await user.type(input, '450');
 
             expect(input).toHaveValue(450);
+        });
+    });
+
+    describe('unit price display', () => {
+        it('should display dash when quantity or price is empty', () => {
+            renderWithProvider();
+
+            const unitPriceElement = screen.getByText(/unit price/i).nextElementSibling;
+            expect(unitPriceElement).toHaveTextContent('—');
+        });
+
+        it('should display computed unit price when quantity and price are filled', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            const quantityInput = screen.getByLabelText(/quantity/i);
+            const priceInput = screen.getByLabelText(/price per unit/i);
+
+            await user.type(quantityInput, '500');
+            await user.type(priceInput, '450');
+
+            const unitPriceElement = screen.getByText(/unit price/i).nextElementSibling;
+            expect(unitPriceElement).toHaveTextContent('₦0.90');
+        });
+
+        it('should update unit price when unit changes', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            const quantityInput = screen.getByLabelText(/quantity/i);
+            const priceInput = screen.getByLabelText(/price per unit/i);
+            const unitSelect = screen.getByLabelText(/^unit$/i);
+
+            await user.type(quantityInput, '2');
+            await user.type(priceInput, '100');
+            await user.selectOptions(unitSelect, 'bags (50kg)');
+
+            const unitPriceElement = screen.getByText(/unit price/i).nextElementSibling;
+            expect(unitPriceElement).toHaveTextContent('₦1.00');
         });
     });
 
@@ -412,6 +452,92 @@ describe('Step1Details', () => {
             // This would be verified by checking if Step2Negotiation is rendered
             // For now, we just verify the button was clickable
             expect(button).not.toBeDisabled();
+        });
+    });
+
+    describe('delivery deadline', () => {
+        const formatDateTimeLocal = (date: Date) => {
+            const pad = (n: number) => String(n).padStart(2, '0');
+            return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        };
+
+        const daysFromNow = (days: number) => {
+            const d = new Date();
+            d.setDate(d.getDate() + days);
+            return d;
+        };
+
+        it('should render delivery deadline input', () => {
+            renderWithProvider();
+
+            const input = screen.getByLabelText(/delivery deadline/i);
+            expect(input).toBeInTheDocument();
+            expect(input).toHaveAttribute('type', 'datetime-local');
+        });
+
+        it('should reject past dates with a clear error message', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            const input = screen.getByLabelText(/delivery deadline/i);
+            const past = daysFromNow(-2);
+            await user.type(input, formatDateTimeLocal(past));
+
+            expect(screen.getByText(/delivery deadline must be at least 1 hour in the future/i)).toBeInTheDocument();
+        });
+
+        it('should reject dates more than 180 days in the future with a clear error message', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            const input = screen.getByLabelText(/delivery deadline/i);
+            const tooFar = daysFromNow(200);
+            await user.type(input, formatDateTimeLocal(tooFar));
+
+            expect(screen.getByText(/delivery deadline cannot be more than 180 days/i)).toBeInTheDocument();
+        });
+
+        it('should accept a valid future date within bounds', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            const input = screen.getByLabelText(/delivery deadline/i);
+            const valid = daysFromNow(5);
+            await user.type(input, formatDateTimeLocal(valid));
+
+            expect(screen.queryByText(/delivery deadline must be at least 1 hour in the future/i)).not.toBeInTheDocument();
+            expect(screen.queryByText(/delivery deadline cannot be more than 180 days/i)).not.toBeInTheDocument();
+        });
+
+        it('should display relative duration label for a valid future date', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            const input = screen.getByLabelText(/delivery deadline/i);
+            const valid = daysFromNow(5);
+            await user.type(input, formatDateTimeLocal(valid));
+
+            expect(screen.getByText(/in 5 days/i)).toBeInTheDocument();
+        });
+
+        it('should keep continue button disabled when delivery deadline is invalid', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            const commoditySelect = screen.getByLabelText(/commodity/i);
+            const quantityInput = screen.getByLabelText(/quantity/i);
+            const priceInput = screen.getByLabelText(/price per unit/i);
+            const addressInput = screen.getByPlaceholderText(/g\.\.\./i);
+            const deadlineInput = screen.getByLabelText(/delivery deadline/i);
+
+            await user.selectOptions(commoditySelect, 'Maize');
+            await user.type(quantityInput, '500');
+            await user.type(priceInput, '450');
+            await user.type(addressInput, 'GBRP4ZDXSS6NZPMTVNE7DZ47JNV7OFPJMIVG4FDCMNZP7CHH4656YEXI');
+            await user.type(deadlineInput, formatDateTimeLocal(daysFromNow(-1)));
+
+            const button = screen.getByRole('button', { name: /continue to negotiation/i });
+            expect(button).toBeDisabled();
         });
     });
 

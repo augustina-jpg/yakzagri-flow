@@ -6,7 +6,12 @@ import { useMemo, useState } from "react";
 import { FormField } from "@/components/ui/FormField";
 import { Button } from "@/components/ui/Button";
 import { ClawbackConfirmationModal } from "./ClawbackConfirmationModal";
-import { validateClawbackAmount } from "@/lib/clawbackValidation";
+import {
+  validateClawbackAmount,
+  validateClawbackRequest,
+  CLAWBACK_REASON_CODES,
+  type ClawbackReasonCode,
+} from "@/lib/clawbackValidation";
 import { useErrorHandler } from "@/hooks/useErrorHandler";
 import { useToast } from "@/hooks/useToast";
 import { api } from "@/lib/api";
@@ -33,6 +38,9 @@ export function StreamClawbackForm({
   onPreview,
 }: StreamClawbackFormProps) {
   const [amount, setAmount] = useState("");
+  const [reasonCode, setReasonCode] = useState<ClawbackReasonCode | "">("");
+  const [auditTicketRef, setAuditTicketRef] = useState("");
+  const [confirmationPhrase, setConfirmationPhrase] = useState("");
   const [touched, setTouched] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const [previewing, setPreviewing] = useState(false);
@@ -46,9 +54,22 @@ export function StreamClawbackForm({
     [amount, remainingVested],
   );
 
+  const requestValidation = useMemo(
+    () =>
+      validateClawbackRequest({
+        reasonCode,
+        auditTicketRef,
+        confirmationPhrase,
+        targetId: streamId,
+      }),
+    [reasonCode, auditTicketRef, confirmationPhrase, streamId],
+  );
+
+  const allValid = validation.valid && requestValidation.valid;
+
   const handleReviewClick = () => {
     setTouched(true);
-    if (!validation.valid) return;
+    if (!allValid) return;
     setModalOpen(true);
   };
 
@@ -77,6 +98,7 @@ export function StreamClawbackForm({
   };
 
   const showError = touched && !validation.valid;
+  const showRequestErrors = touched && !requestValidation.valid;
 
   return (
     <div className="space-y-4">
@@ -102,7 +124,72 @@ export function StreamClawbackForm({
         />
       </FormField>
 
-      <Button variant="primary" onClick={handleReviewClick} disabled={!validation.valid}>
+      <FormField
+        label="Regulatory reason code"
+        name="clawback-reason-code"
+        required
+        error={showRequestErrors ? (requestValidation.errors.reasonCode ?? undefined) : undefined}
+      >
+        <select
+          value={reasonCode}
+          onChange={(e) => {
+            setReasonCode(e.target.value as ClawbackReasonCode | "");
+            setTouched(true);
+            setPreviewResult(null);
+          }}
+          onBlur={() => setTouched(true)}
+          className="w-full rounded-md border border-border-default bg-bg-elevated px-3 py-2 text-sm text-text-primary focus-visible:outline-2 focus-visible:outline-gold"
+        >
+          <option value="">Select a reason code</option>
+          {CLAWBACK_REASON_CODES.map((code) => (
+            <option key={code} value={code}>
+              {code}
+            </option>
+          ))}
+        </select>
+      </FormField>
+
+      <FormField
+        label="Audit ticket reference"
+        name="clawback-audit-ticket"
+        required
+        error={showRequestErrors ? (requestValidation.errors.auditTicketRef ?? undefined) : undefined}
+      >
+        <input
+          type="text"
+          value={auditTicketRef}
+          onChange={(e) => {
+            setAuditTicketRef(e.target.value);
+            setTouched(true);
+            setPreviewResult(null);
+          }}
+          onBlur={() => setTouched(true)}
+          className="w-full rounded-md border border-border-default bg-bg-elevated px-3 py-2 text-sm text-text-primary focus-visible:outline-2 focus-visible:outline-gold"
+          placeholder="e.g. SEC-2024-00123"
+        />
+      </FormField>
+
+      <FormField
+        label={`Type "${streamId}" to confirm`}
+        name="clawback-confirmation-phrase"
+        required
+        error={showRequestErrors ? (requestValidation.errors.confirmationPhrase ?? undefined) : undefined}
+      >
+        <input
+          type="text"
+          value={confirmationPhrase}
+          onChange={(e) => {
+            setConfirmationPhrase(e.target.value);
+            setTouched(true);
+            setPreviewResult(null);
+          }}
+          onBlur={() => setTouched(true)}
+          className="w-full rounded-md border border-border-default bg-bg-elevated px-3 py-2 text-sm text-text-primary focus-visible:outline-2 focus-visible:outline-gold"
+          placeholder={streamId}
+        />
+      </FormField>
+
+      <Button variant="primary" onClick={handleReviewClick} disabled={!allValid}>
         {translateCopy("ui.review_clawback_043eda9")}
       </Button>
 
@@ -120,6 +207,9 @@ export function StreamClawbackForm({
         streamId={streamId}
         amount={amount}
         remainingVested={remainingVested}
+        reasonCode={reasonCode}
+        auditTicketRef={auditTicketRef}
+        confirmationPhrase={confirmationPhrase}
         onPreview={handlePreview}
         onCancel={handleCancel}
         previewing={previewing}

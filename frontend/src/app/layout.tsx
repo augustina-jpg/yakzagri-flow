@@ -41,10 +41,20 @@ export const metadata: Metadata = {
     statusBarStyle: "default",
     title: "Amana",
   },
+  icons: {
+    icon: [
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512x512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/icons/icon-192x192.png", sizes: "192x192", type: "image/png" },
+    ],
+  },
   other: {
     "mobile-web-app-capable": "yes",
     "apple-mobile-web-app-capable": "yes",
     "apple-mobile-web-app-status-bar-style": "black-translucent",
+    "apple-mobile-web-app-title": "Amana",
   },
 };
 
@@ -65,6 +75,10 @@ const themeScript = `
       dark = pref === 'dark';
     }
     document.documentElement.classList.add(dark ? 'dark' : 'light');
+    var storedLocale = localStorage.getItem('amana-locale');
+    if (storedLocale) {
+      document.documentElement.lang = storedLocale;
+    }
   } catch(e) {
     document.documentElement.classList.add('dark');
   }
@@ -77,13 +91,19 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en-NG" suppressHydrationWarning>
+    <html lang="en-NG" dir="ltr" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body
         className={`${geistSans.variable} ${geistMono.variable} ${manrope.variable} font-sans bg-primary text-text-primary antialiased`}
       >
+        <a
+          href="#main-content"
+          className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-[9999] focus:inline-block focus:rounded-md focus:bg-white focus:px-4 focus:py-2 focus:text-base focus:font-semibold focus:text-black focus:shadow-lg focus:outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-black dark:focus:bg-black dark:focus:text-white dark:focus-visible:outline-white"
+        >
+          Skip to main content
+        </a>
         <LocaleProvider>
           <ThemeProvider>
             <AnalyticsProvider>

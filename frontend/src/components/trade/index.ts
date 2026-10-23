@@ -14,3 +14,5 @@ export { TradeListItem } from "./TradeListItem";
 export type { TradeListItemProps } from "./TradeListItem";
 export { DisputeVerificationModal } from "./DisputeVerificationModal";
 export type { DisputeVerificationModalProps } from "./DisputeVerificationModal";
+export { NextActionCallout } from "./NextActionCallout";
+export type { NextActionCalloutProps } from "./NextActionCallout";

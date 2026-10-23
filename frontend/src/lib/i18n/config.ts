@@ -47,3 +47,24 @@ export function resolveLocale(explicit?: Locale): Locale {
 export function intlLocale(locale: Locale): string {
   return locale === "pseudo" ? DEFAULT_LOCALE : locale;
 }
+
+export type LocaleDirection = "ltr" | "rtl";
+
+/**
+ * Returns text direction ('ltr' or 'rtl') for a given locale.
+ * Standard Nigerian locales (en-NG, ha-NG, yo-NG, ig-NG) use Latin script (ltr).
+ * Right-to-left scripts (e.g. Arabic, Hebrew, or Ajami variants) return rtl.
+ */
+export function localeDirection(locale: Locale | string): LocaleDirection {
+  if (
+    locale.startsWith("ar") ||
+    locale.startsWith("he") ||
+    locale.startsWith("fa") ||
+    locale.startsWith("ur") ||
+    locale.includes("-Arab") ||
+    locale.includes("-Hebr")
+  ) {
+    return "rtl";
+  }
+  return "ltr";
+}

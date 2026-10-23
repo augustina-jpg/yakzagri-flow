@@ -1,5 +1,3 @@
-import { formatNumber } from "@/lib/i18n/format";
-
 /**
  * Asset configuration for Stellar-based tokens
  * Handles different asset types with their decimal precision and formatting
@@ -161,7 +159,21 @@ export function getAssetDivisor(decimals: number): bigint {
 }
 
 /**
- * Convert stroops/smallest unit to human-readable amount
+ * Group a non-negative BigInt string representation with thousands separators.
+ * This avoids `Number(bigint)` which loses precision past `Number.MAX_SAFE_INTEGER`.
+ */
+function groupBigIntString(value: bigint): string {
+  const sign = value < 0n ? "-" : "";
+  const digits = (value < 0n ? -value : value).toString();
+  // Insert commas every 3 digits from the right
+  return sign + digits.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+/**
+ * Convert stroops/smallest unit to human-readable amount.
+ *
+ * Pure BigInt + string math — never goes through IEEE-754 `Number`, so it is
+ * exact for the full Int64 range (up to 922337203685.4775807 with 7 decimals).
  */
 export function stroopsToAmount(stroops: string | bigint, decimals: number): string {
   const stroopsValue = typeof stroops === "string" ? BigInt(stroops) : stroops;
@@ -173,28 +185,34 @@ export function stroopsToAmount(stroops: string | bigint, decimals: number): str
   const fracStr = frac.toString().padStart(decimals, "0").replace(/0+$/, "");
 
   return fracStr.length > 0
-    ? `${formatNumber(whole)}.${fracStr}`
-    : formatNumber(whole);
+    ? `${groupBigIntString(whole)}.${fracStr}`
+    : groupBigIntString(whole);
 }
 
 /**
- * Convert human-readable amount to stroops/smallest unit
+ * Convert human-readable amount to stroops/smallest unit.
+ *
+ * Splits the input into integer and fractional parts and uses pure BigInt math
+ * — never multiplying through a `Number` intermediate — so large amounts up to
+ * Int64 max are exact.
  */
 export function amountToStroops(amount: string, decimals: number): string {
   // Remove commas and whitespace
   const cleaned = amount.replace(/[,\s]/g, "");
-  
+
   // Split into whole and fractional parts
   const parts = cleaned.split(".");
   const whole = parts[0] || "0";
   const frac = parts[1] || "";
-  
+
   // Pad or truncate fractional part to match decimals
   const paddedFrac = frac.padEnd(decimals, "0").slice(0, decimals);
-  
-  // Combine and convert to stroops
-  const stroopsValue = BigInt(whole) * getAssetDivisor(decimals) + BigInt(paddedFrac);
-  
+
+  // Combine and convert to stroops using pure BigInt arithmetic
+  const stroopsValue =
+    BigInt(whole) * getAssetDivisor(decimals) +
+    (decimals > 0 ? BigInt(paddedFrac) : 0n);
+
   return stroopsValue.toString();
 }
 

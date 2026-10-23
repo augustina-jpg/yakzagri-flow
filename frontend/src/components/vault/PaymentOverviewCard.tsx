@@ -8,10 +8,22 @@ import { BentoCard } from "@/components/ui/BentoCard";
 import { formatNumber } from "@/lib/i18n/format";
 import { getNgnExchangeRate } from "@/lib/exchangeRate";
 
+export interface VaultAllocationSlice {
+  label: string;
+  percent: number;
+  colorClass: string;
+}
+
 interface PaymentOverviewCardProps {
   totalCngn: number;
   ngnRate?: number;
+  allocations?: VaultAllocationSlice[];
 }
+
+const DEFAULT_ALLOCATIONS: VaultAllocationSlice[] = [
+  { label: "Seller Settlement Pool", percent: 99, colorClass: "bg-emerald" },
+  { label: "Platform Escrow Reserve", percent: 1, colorClass: "bg-gold" },
+];
 
 interface CostLineItem {
   label: string;
@@ -51,6 +63,7 @@ const LINE_ITEMS: CostLineItem[] = [
 export function PaymentOverviewCard({
   totalCngn,
   ngnRate,
+  allocations = DEFAULT_ALLOCATIONS,
 }: PaymentOverviewCardProps) {
   // Use passed ngnRate or fall back to config
   const rate = ngnRate ?? getNgnExchangeRate();
@@ -99,6 +112,36 @@ export function PaymentOverviewCard({
             </span>
           </div>
         ))}
+      </div>
+
+      {/* Asset allocation breakdown */}
+      <div className="mt-4 pt-3 border-t border-border-default" data-testid="vault-allocation-breakdown">
+        <p className="text-xs font-semibold uppercase tracking-wider text-text-muted mb-2">
+          Asset Allocation Breakdown
+        </p>
+        <div
+          className="flex h-2 w-full rounded-full overflow-hidden gap-0.5 mb-2"
+          role="img"
+          aria-label="Vault asset allocation breakdown"
+        >
+          {allocations.map((slice) => (
+            <div
+              key={slice.label}
+              className={slice.colorClass}
+              style={{ width: `${Math.max(0, Math.min(100, slice.percent))}%` }}
+              title={`${slice.label}: ${slice.percent}%`}
+            />
+          ))}
+        </div>
+        <div className="flex flex-wrap gap-3 text-xs text-text-secondary">
+          {allocations.map((slice) => (
+            <div key={slice.label} className="flex items-center gap-1.5">
+              <span className={`inline-block w-2 h-2 rounded-full ${slice.colorClass}`} />
+              <span>{slice.label}</span>
+              <span className="font-semibold text-text-primary">{slice.percent}%</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="bg-gold-muted/20 border-l-[3px] border-gold text-gold font-bold px-4 py-2 mt-4 rounded-r-md flex items-center justify-between">

@@ -22,6 +22,9 @@ jest.mock('next/image', () => ({
 }));
 
 describe('ContractManifestCard Component', () => {
+    const sorobanContractId = 'CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4';
+    const wasmHash = 'a3f1c9d2e4b5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f';
+
     const defaultProps = {
         contractId: 'AMN-772-VLT-09',
         agreementDate: 'September 24, 2023',
@@ -40,8 +43,27 @@ describe('ContractManifestCard Component', () => {
         onViewClauses: jest.fn(),
     };
 
+    const sorobanProps = {
+        ...defaultProps,
+        sorobanContractId,
+        network: 'testnet' as const,
+        wasmHash,
+        wasmHashVerified: true,
+    };
+
+    const originalClipboard = navigator.clipboard;
+
     beforeEach(() => {
         jest.clearAllMocks();
+        Object.assign(navigator, {
+            clipboard: {
+                writeText: jest.fn().mockResolvedValue(undefined),
+            },
+        });
+    });
+
+    afterEach(() => {
+        Object.assign(navigator, { clipboard: originalClipboard });
     });
 
     it('renders without crashing with all props', () => {
@@ -196,5 +218,70 @@ describe('ContractManifestCard Component', () => {
         const { container } = render(<ContractManifestCard {...defaultProps} />);
         const card = container.querySelector('[data-testid="bento-card"]');
         expect(card).toHaveClass('h-104');
+    });
+
+    describe('Soroban contract ID verification', () => {
+        it('displays the full Soroban contract ID', () => {
+            render(<ContractManifestCard {...sorobanProps} />);
+            expect(screen.getByText(sorobanContractId)).toBeInTheDocument();
+        });
+
+        it('renders a copy button with an accessible label', () => {
+            render(<ContractManifestCard {...sorobanProps} />);
+            expect(
+                screen.getByRole('button', { name: /copy soroban contract id/i })
+            ).toBeInTheDocument();
+        });
+
+        it('copies the contract ID to the clipboard when the copy button is clicked', () => {
+            render(<ContractManifestCard {...sorobanProps} />);
+            fireEvent.click(screen.getByRole('button', { name: /copy soroban contract id/i }));
+            expect(navigator.clipboard.writeText).toHaveBeenCalledWith(sorobanContractId);
+        });
+
+        it('shows a copied confirmation after clicking the copy button', async () => {
+            render(<ContractManifestCard {...sorobanProps} />);
+            fireEvent.click(screen.getByRole('button', { name: /copy soroban contract id/i }));
+            expect(await screen.findByText(/copied/i)).toBeInTheDocument();
+        });
+
+        it('announces the copy result to screen readers via a live region', async () => {
+            render(<ContractManifestCard {...sorobanProps} />);
+            fireEvent.click(screen.getByRole('button', { name: /copy soroban contract id/i }));
+            const status = await screen.findByRole('status');
+            expect(status).toHaveTextContent(/copied/i);
+        });
+
+        it('renders an explorer link for the contract ID', () => {
+            render(<ContractManifestCard {...sorobanProps} />);
+            const link = screen.getByRole('link', { name: /view .* on stellar explorer/i });
+            expect(link).toHaveAttribute('href', expect.stringContaining(sorobanContractId));
+            expect(link).toHaveAttribute('target', '_blank');
+        });
+
+        it('displays the Testnet network badge', () => {
+            render(<ContractManifestCard {...sorobanProps} />);
+            expect(screen.getByText(/testnet/i)).toBeInTheDocument();
+        });
+
+        it('displays the Mainnet network badge when network is public', () => {
+            render(<ContractManifestCard {...sorobanProps} network="public" />);
+            expect(screen.getByText(/mainnet/i)).toBeInTheDocument();
+        });
+
+        it('shows verified status when the WASM hash is verified', () => {
+            render(<ContractManifestCard {...sorobanProps} />);
+            expect(screen.getByText(/wasm hash verified/i)).toBeInTheDocument();
+        });
+
+        it('shows unverified status when the WASM hash is not verified', () => {
+            render(<ContractManifestCard {...sorobanProps} wasmHashVerified={false} />);
+            expect(screen.getByText(/wasm hash unverified/i)).toBeInTheDocument();
+        });
+
+        it('displays the WASM hash value', () => {
+            render(<ContractManifestCard {...sorobanProps} />);
+            expect(screen.getByText(wasmHash)).toBeInTheDocument();
+        });
     });
 });

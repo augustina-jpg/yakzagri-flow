@@ -8,6 +8,7 @@ import {
   resolveCorrelationId,
 } from "@/lib/correlationId";
 import { reportBoundaryError } from "@/lib/errorReporter";
+import { ErrorBoundaryFallbackPage } from "./ErrorBoundaryFallbackPage";
 
 // ─── Public API ────────────────────────────────────────────────────────────
 
@@ -244,7 +245,7 @@ export class ErrorBoundary extends Component<
 
     // Default branded fallback
     return (
-      <DefaultFallback
+      <ErrorBoundaryFallbackPage
         error={error}
         correlationId={correlationId}
         onReset={this.handleReset}

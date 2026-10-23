@@ -159,6 +159,90 @@ const ERROR_MESSAGE_MAP: Record<string, { title: string; message: string; type: 
 };
 
 /**
+ * Soroban contract error codes for the amana_escrow contract.
+ *
+ * Mirrors the `error` enum in `schemas/events/amana_escrow.events.json`
+ * (see also `docs/shared-schemas.md`). Soroban surfaces these as
+ * `Error(Contract, #N)` in Horizon / Soroban RPC responses.
+ */
+export enum SorobanContractErrorCode {
+  UNAUTHORIZED = 1,
+  ESCROW_ALREADY_FUNDED = 4,
+  INVALID_LOSS_RATIO = 5,
+  INVALID_STATE = 6,
+  INVALID_AMOUNT = 7,
+  ESCROW_NOT_FOUND = 8,
+  INSUFFICIENT_BALANCE = 9,
+  DEADLINE_PASSED = 10,
+  ALREADY_RELEASED = 11,
+  INVALID_CALLER = 12,
+}
+
+/**
+ * User-friendly messages for known Soroban contract error codes.
+ */
+const SOROBAN_ERROR_MESSAGE_MAP: Record<number, string> = {
+  [SorobanContractErrorCode.UNAUTHORIZED]: "Unauthorized caller for release",
+  [SorobanContractErrorCode.ESCROW_ALREADY_FUNDED]: "Escrow is already funded",
+  [SorobanContractErrorCode.INVALID_LOSS_RATIO]: "Invalid loss ratio",
+  [SorobanContractErrorCode.INVALID_STATE]: "Operation is not allowed in the current escrow state",
+  [SorobanContractErrorCode.INVALID_AMOUNT]: "Invalid amount provided to the contract",
+  [SorobanContractErrorCode.ESCROW_NOT_FOUND]: "Escrow not found",
+  [SorobanContractErrorCode.INSUFFICIENT_BALANCE]: "Insufficient balance to complete this operation",
+  [SorobanContractErrorCode.DEADLINE_PASSED]: "The escrow deadline has passed",
+  [SorobanContractErrorCode.ALREADY_RELEASED]: "Escrow funds have already been released",
+  [SorobanContractErrorCode.INVALID_CALLER]: "Unauthorized caller for this contract operation",
+};
+
+/**
+ * Matches Soroban contract error strings such as `Error(Contract, #4)`.
+ */
+const SOROBAN_CONTRACT_ERROR_REGEX = /Error\(\s*Contract\s*,\s*#(\d+)\s*\)/i;
+
+/**
+ * Parse a Soroban contract error code from an error message or ApiError data.
+ *
+ * Detects `Error(Contract, #N)` shapes (including Soroban RPC simulation
+ * failures) and returns the numeric code with a friendly message. Unknown
+ * codes fall back to a generic message that preserves the raw code.
+ */
+export function parseSorobanContractError(
+  error: ApiError | Error | string | null | undefined
+): { code: number; message: string } | null {
+  const candidates: string[] = [];
+
+  if (typeof error === "string") {
+    candidates.push(error);
+  } else if (error) {
+    if (error.message) {
+      candidates.push(error.message);
+    }
+    if (error instanceof ApiError && typeof error.data === "object" && error.data !== null) {
+      const data = error.data as Record<string, unknown>;
+      for (const key of ["message", "error", "details", "reason"]) {
+        const value = data[key];
+        if (typeof value === "string") {
+          candidates.push(value);
+        }
+      }
+    }
+  }
+
+  for (const candidate of candidates) {
+    const match = candidate.match(SOROBAN_CONTRACT_ERROR_REGEX);
+    if (match) {
+      const code = Number(match[1]);
+      const message =
+        SOROBAN_ERROR_MESSAGE_MAP[code] ??
+        `Contract error #${code} — please contact support with this code`;
+      return { code, message };
+    }
+  }
+
+  return null;
+}
+
+/**
  * HTTP status code to toast type mapping
  */
 const STATUS_CODE_MAP: Record<number, ToastType> = {
@@ -194,6 +278,16 @@ export function getErrorInfo(error: ApiError | Error): {
   message: string;
   type: ToastType;
 } {
+  // Handle Soroban contract errors surfaced via Horizon / Soroban RPC
+  const sorobanError = parseSorobanContractError(error);
+  if (sorobanError) {
+    return {
+      title: "Contract Error",
+      message: sorobanError.message,
+      type: "error",
+    };
+  }
+
   // Handle ApiError with backend error response
   if (error instanceof ApiError) {
     const backendError = parseBackendError(error);

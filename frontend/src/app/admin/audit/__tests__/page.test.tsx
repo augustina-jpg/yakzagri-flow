@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import AdminAuditHistoryPage from "../page";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsAdmin } from "@/hooks/useIsAdmin";
@@ -123,6 +123,130 @@ describe("AdminAuditHistoryPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("No admin actions recorded yet")).toBeInTheDocument();
+    });
+  });
+
+  describe("filtering", () => {
+    const mixedEntries = [
+      makeEntry({
+        id: 1,
+        action: "TREASURY_WITHDRAW",
+        actorAddress: "GADMIN1111111111",
+        createdAt: "2026-07-01T12:00:00.000Z",
+      }),
+      makeEntry({
+        id: 2,
+        action: "CONTRACT_PAUSE",
+        actorAddress: "GADMIN2222222222",
+        createdAt: "2026-07-10T12:00:00.000Z",
+      }),
+      makeEntry({
+        id: 3,
+        action: "DISPUTE_RESOLVED",
+        actorAddress: "GADMIN3333333333",
+        createdAt: "2026-07-20T12:00:00.000Z",
+      }),
+    ];
+
+    beforeEach(() => {
+      mockList.mockResolvedValue({
+        items: mixedEntries,
+        pagination: { page: 1, limit: 20, total: 3, totalPages: 1 },
+      });
+    });
+
+    async function renderLoaded() {
+      render(<AdminAuditHistoryPage />);
+      await waitFor(() => {
+        expect(screen.getByText("Treasury Withdraw")).toBeInTheDocument();
+      });
+    }
+
+    it("renders all entries before any filters are applied", async () => {
+      await renderLoaded();
+
+      expect(screen.getByText("Treasury Withdraw")).toBeInTheDocument();
+      expect(screen.getByText("Contract Pause")).toBeInTheDocument();
+      expect(screen.getByText("Dispute Resolved")).toBeInTheDocument();
+    });
+
+    it("narrows the list when an actor address is typed", async () => {
+      await renderLoaded();
+
+      fireEvent.change(screen.getByLabelText(/actor address/i), {
+        target: { value: "GADMIN2222222222" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Contract Pause")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Treasury Withdraw")).not.toBeInTheDocument();
+      expect(screen.queryByText("Dispute Resolved")).not.toBeInTheDocument();
+    });
+
+    it("narrows the list when an action type is selected", async () => {
+      await renderLoaded();
+
+      fireEvent.change(screen.getByLabelText(/action type/i), {
+        target: { value: "DISPUTE_RESOLVED" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Dispute Resolved")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Treasury Withdraw")).not.toBeInTheDocument();
+      expect(screen.queryByText("Contract Pause")).not.toBeInTheDocument();
+    });
+
+    it("narrows the list when a start date is set", async () => {
+      await renderLoaded();
+
+      fireEvent.change(screen.getByLabelText(/start date/i), {
+        target: { value: "2026-07-15" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Dispute Resolved")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Treasury Withdraw")).not.toBeInTheDocument();
+      expect(screen.queryByText("Contract Pause")).not.toBeInTheDocument();
+    });
+
+    it("narrows the list when an end date is set", async () => {
+      await renderLoaded();
+
+      fireEvent.change(screen.getByLabelText(/end date/i), {
+        target: { value: "2026-07-05" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText("Treasury Withdraw")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("Contract Pause")).not.toBeInTheDocument();
+      expect(screen.queryByText("Dispute Resolved")).not.toBeInTheDocument();
+    });
+
+    it("updates the active filter count and clears filters", async () => {
+      await renderLoaded();
+
+      fireEvent.change(screen.getByLabelText(/actor address/i), {
+        target: { value: "GADMIN1111111111" },
+      });
+      fireEvent.change(screen.getByLabelText(/action type/i), {
+        target: { value: "TREASURY_WITHDRAW" },
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("active-filter-count")).toHaveTextContent("2");
+      });
+
+      fireEvent.click(screen.getByRole("button", { name: /clear filters/i }));
+
+      await waitFor(() => {
+        expect(screen.getByText("Contract Pause")).toBeInTheDocument();
+      });
+      expect(screen.getByText("Dispute Resolved")).toBeInTheDocument();
+      expect(screen.getByTestId("active-filter-count")).toHaveTextContent("0");
     });
   });
 });

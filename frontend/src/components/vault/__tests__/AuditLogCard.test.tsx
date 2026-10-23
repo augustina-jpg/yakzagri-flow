@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { AuditLogCard } from '../AuditLogCard';
 
 // Mock the BentoCard component
@@ -179,5 +179,156 @@ describe('AuditLogCard Component', () => {
         expect(screen.getByText('Biometric Entry')).toBeInTheDocument();
         expect(screen.getByText('Multi-sig Entry')).toBeInTheDocument();
         expect(screen.getByText('Ledger Entry')).toBeInTheDocument();
+    });
+
+    describe('event type filtering', () => {
+        const filterEntries = [
+            {
+                type: 'deposit' as const,
+                title: 'Deposit received',
+                metadata: '2m ago',
+                txHash: 'abc123deposit',
+            },
+            {
+                type: 'release' as const,
+                title: 'Funds released',
+                metadata: '1h ago',
+                txHash: 'abc123release',
+            },
+            {
+                type: 'dispute' as const,
+                title: 'Dispute opened',
+                metadata: '3h ago',
+                txHash: 'abc123dispute',
+            },
+            {
+                type: 'rebalance' as const,
+                title: 'Portfolio rebalanced',
+                metadata: 'Yesterday',
+                txHash: 'abc123rebalance',
+            },
+        ];
+
+        it('renders filter pills for each event category', () => {
+            render(<AuditLogCard {...defaultProps} entries={filterEntries} />);
+            expect(screen.getByRole('button', { name: /all/i })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: /deposit/i })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: /release/i })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: /dispute/i })).toBeInTheDocument();
+            expect(screen.getByRole('button', { name: /rebalance/i })).toBeInTheDocument();
+        });
+
+        it('shows all entries when the All filter is selected', () => {
+            render(<AuditLogCard {...defaultProps} entries={filterEntries} />);
+            fireEvent.click(screen.getByRole('button', { name: /all/i }));
+            expect(screen.getByText('Deposit received')).toBeInTheDocument();
+            expect(screen.getByText('Funds released')).toBeInTheDocument();
+            expect(screen.getByText('Dispute opened')).toBeInTheDocument();
+            expect(screen.getByText('Portfolio rebalanced')).toBeInTheDocument();
+        });
+
+        it('shows only deposit entries when the deposit filter is selected', () => {
+            render(<AuditLogCard {...defaultProps} entries={filterEntries} />);
+            fireEvent.click(screen.getByRole('button', { name: /deposit/i }));
+            expect(screen.getByText('Deposit received')).toBeInTheDocument();
+            expect(screen.queryByText('Funds released')).not.toBeInTheDocument();
+            expect(screen.queryByText('Dispute opened')).not.toBeInTheDocument();
+            expect(screen.queryByText('Portfolio rebalanced')).not.toBeInTheDocument();
+        });
+
+        it('shows only release entries when the release filter is selected', () => {
+            render(<AuditLogCard {...defaultProps} entries={filterEntries} />);
+            fireEvent.click(screen.getByRole('button', { name: /release/i }));
+            expect(screen.getByText('Funds released')).toBeInTheDocument();
+            expect(screen.queryByText('Deposit received')).not.toBeInTheDocument();
+            expect(screen.queryByText('Dispute opened')).not.toBeInTheDocument();
+            expect(screen.queryByText('Portfolio rebalanced')).not.toBeInTheDocument();
+        });
+
+        it('shows only dispute entries when the dispute filter is selected', () => {
+            render(<AuditLogCard {...defaultProps} entries={filterEntries} />);
+            fireEvent.click(screen.getByRole('button', { name: /dispute/i }));
+            expect(screen.getByText('Dispute opened')).toBeInTheDocument();
+            expect(screen.queryByText('Deposit received')).not.toBeInTheDocument();
+            expect(screen.queryByText('Funds released')).not.toBeInTheDocument();
+            expect(screen.queryByText('Portfolio rebalanced')).not.toBeInTheDocument();
+        });
+
+        it('shows only rebalance entries when the rebalance filter is selected', () => {
+            render(<AuditLogCard {...defaultProps} entries={filterEntries} />);
+            fireEvent.click(screen.getByRole('button', { name: /rebalance/i }));
+            expect(screen.getByText('Portfolio rebalanced')).toBeInTheDocument();
+            expect(screen.queryByText('Deposit received')).not.toBeInTheDocument();
+            expect(screen.queryByText('Funds released')).not.toBeInTheDocument();
+            expect(screen.queryByText('Dispute opened')).not.toBeInTheDocument();
+        });
+
+        it('restores all entries when switching back to the All filter', () => {
+            render(<AuditLogCard {...defaultProps} entries={filterEntries} />);
+            fireEvent.click(screen.getByRole('button', { name: /deposit/i }));
+            expect(screen.queryByText('Funds released')).not.toBeInTheDocument();
+            fireEvent.click(screen.getByRole('button', { name: /all/i }));
+            expect(screen.getByText('Deposit received')).toBeInTheDocument();
+            expect(screen.getByText('Funds released')).toBeInTheDocument();
+            expect(screen.getByText('Dispute opened')).toBeInTheDocument();
+            expect(screen.getByText('Portfolio rebalanced')).toBeInTheDocument();
+        });
+    });
+
+    describe('transaction hash actions', () => {
+        const txEntries = [
+            {
+                type: 'deposit' as const,
+                title: 'Deposit received',
+                metadata: '2m ago',
+                txHash: 'deadbeefcafebabe0123456789abcdef0123456789abcdef0123456789abcdef',
+            },
+        ];
+
+        const originalClipboard = navigator.clipboard;
+
+        afterEach(() => {
+            Object.defineProperty(navigator, 'clipboard', {
+                value: originalClipboard,
+                configurable: true,
+                writable: true,
+            });
+            jest.restoreAllMocks();
+        });
+
+        it('renders a copy button for the transaction hash', () => {
+            render(<AuditLogCard {...defaultProps} entries={txEntries} />);
+            expect(
+                screen.getByRole('button', { name: /copy transaction hash/i })
+            ).toBeInTheDocument();
+        });
+
+        it('copies the transaction hash to the clipboard when the copy button is clicked', async () => {
+            const writeText = jest.fn().mockResolvedValue(undefined);
+            Object.defineProperty(navigator, 'clipboard', {
+                value: { writeText },
+                configurable: true,
+                writable: true,
+            });
+
+            render(<AuditLogCard {...defaultProps} entries={txEntries} />);
+            fireEvent.click(screen.getByRole('button', { name: /copy transaction hash/i }));
+
+            await waitFor(() => {
+                expect(writeText).toHaveBeenCalledWith(txEntries[0].txHash);
+            });
+        });
+
+        it('renders a Stellar Expert link for the transaction hash', () => {
+            render(<AuditLogCard {...defaultProps} entries={txEntries} />);
+            const link = screen.getByRole('link', { name: /view .* on stellar expert/i });
+            expect(link).toBeInTheDocument();
+            expect(link).toHaveAttribute(
+                'href',
+                expect.stringContaining(txEntries[0].txHash)
+            );
+            expect(link).toHaveAttribute('target', '_blank');
+            expect(link).toHaveAttribute('rel', expect.stringContaining('noopener'));
+        });
     });
 });

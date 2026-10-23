@@ -103,6 +103,7 @@ export default function ReputationPage() {
   const [data, setData] = useState<ReputationResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [trendWindow, setTrendWindow] = useState<"all" | "7d" | "30d" | "90d">("all");
 
   const fetchReputation = useCallback(async () => {
     if (!token) return;
@@ -189,6 +190,35 @@ export default function ReputationPage() {
 
   const ringScore = (data.trustScore / 100) * 5;
 
+  const scoreFactors = [
+    {
+      label: "Settlement Reliability",
+      weight: "50%",
+      score: Math.min(100, Math.round(data.successRate)),
+    },
+    {
+      label: "Dispute Resolution Ratio",
+      weight: "30%",
+      score:
+        data.totalTrades > 0
+          ? Math.max(0, Math.round(((data.totalTrades - data.disputedTrades) / data.totalTrades) * 100))
+          : 100,
+    },
+    {
+      label: "Completion Volume",
+      weight: "20%",
+      score: Math.min(100, data.completedTrades * 10),
+    },
+  ];
+
+  const filteredHistory = data.history.filter((item) => {
+    if (trendWindow === "all") return true;
+    const days = trendWindow === "7d" ? 7 : trendWindow === "30d" ? 30 : 90;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    const ts = Date.parse(item.timestamp);
+    return Number.isFinite(ts) ? ts >= cutoff : true;
+  });
+
   const metrics = [
     {
       title: "Total Trades",
@@ -245,15 +275,67 @@ export default function ReputationPage() {
         </div>
       </div>
 
+      {/* Score Breakdown Factors */}
+      <div
+        className="bg-bg-elevated rounded-lg border border-border-default p-6 mb-8"
+        data-testid="reputation-score-factors"
+      >
+        <h2 className="text-lg font-semibold text-text-primary mb-4">Score Breakdown Factors</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {scoreFactors.map((factor) => (
+            <div
+              key={factor.label}
+              className="rounded-lg border border-border-default bg-surface-1 p-4 space-y-2"
+            >
+              <div className="flex items-center justify-between text-xs text-text-secondary">
+                <span>{factor.label}</span>
+                <span className="font-mono text-text-muted">Weight: {factor.weight}</span>
+              </div>
+              <div className="text-lg font-bold text-text-primary">{factor.score}%</div>
+              <div className="h-1.5 w-full rounded-full bg-surface-2 overflow-hidden">
+                <div
+                  className="h-full bg-gold transition-all"
+                  style={{ width: `${factor.score}%` }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="bg-bg-elevated rounded-lg border border-border-default">
-        <div className="p-6 border-b border-border-default">
-          <h2 className="text-xl font-semibold text-text-primary">{translateCopy("ui.trust_history_4968d5f")}</h2>
-          <p className="text-sm text-text-secondary mt-1">
-            {translateCopy("ui.recent_events_that_impacted_your_52215a2")}
-          </p>
+        <div className="p-6 border-b border-border-default flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h2 className="text-xl font-semibold text-text-primary">{translateCopy("ui.trust_history_4968d5f")}</h2>
+            <p className="text-sm text-text-secondary mt-1">
+              {translateCopy("ui.recent_events_that_impacted_your_52215a2")}
+            </p>
+          </div>
+          <div
+            className="flex items-center gap-1.5"
+            role="group"
+            aria-label="Historical trend filter"
+            data-testid="reputation-trend-filter"
+          >
+            {(["all", "7d", "30d", "90d"] as const).map((windowKey) => (
+              <button
+                key={windowKey}
+                type="button"
+                aria-pressed={trendWindow === windowKey}
+                onClick={() => setTrendWindow(windowKey)}
+                className={`px-3 py-1 rounded-md text-xs font-semibold uppercase transition-colors ${
+                  trendWindow === windowKey
+                    ? "bg-gold text-text-inverse"
+                    : "bg-surface-2 text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                {windowKey === "all" ? "All Time" : windowKey}
+              </button>
+            ))}
+          </div>
         </div>
         <div className="p-6">
-          {data.history.length === 0 ? (
+          {filteredHistory.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center space-y-3">
               <Clock className="w-12 h-12 text-text-muted" />
               <p className="text-text-secondary">
@@ -262,7 +344,7 @@ export default function ReputationPage() {
             </div>
           ) : (
             <div className="space-y-0">
-              {data.history.map((item) => (
+              {filteredHistory.map((item) => (
                 <div
                   key={item.id}
                   className="flex items-center justify-between py-3 border-b border-border-default last:border-b-0"
