@@ -1,25 +1,40 @@
 import { z } from "zod";
+import { StrKey } from "@stellar/stellar-sdk";
+
+const isValidStellarAddress = (value: string): boolean => {
+  const address = value.trim();
+  if (!address) return false;
+  if (address.startsWith("G")) return StrKey.isValidEd25519PublicKey(address);
+  if (address.startsWith("C")) return StrKey.isValidContract(address);
+  return false;
+};
 
 export const TradeSchema = z.object({
   tradeId: z.string().min(1, "Trade ID is required"),
-  buyerAddress: z.string().min(1, "Buyer address is required"),
-  sellerAddress: z.string().min(1, "Seller address is required"),
+  buyerAddress: z
+    .string()
+    .min(1, "Buyer address is required")
+    .refine((value) => isValidStellarAddress(value), { message: "Invalid Stellar address" }),
+  sellerAddress: z
+    .string()
+    .min(1, "Seller address is required")
+    .refine((value) => isValidStellarAddress(value), { message: "Invalid Stellar address" }),
   amountCngn: z
     .string()
-    .regex(/^\d+(\.\d+)?$/, "Amount must be a valid positive number"),
+    .regex(/^\d+(\.\d+)?$/, t("validation.amountPositiveNumber")),
   buyerLossBps: z
     .number()
-    .int("Must be a whole number")
-    .min(0, "Cannot be negative")
-    .max(10000, "Cannot exceed 10000 bps"),
+    .int(t("validation.wholeNumber"))
+    .min(0, t("validation.nonNegative"))
+    .max(10000, t("validation.maxBps")),
   sellerLossBps: z
     .number()
-    .int("Must be a whole number")
-    .min(0, "Cannot be negative")
-    .max(10000, "Cannot exceed 10000 bps"),
-  status: z.string().min(1, "Status is required"),
-  createdAt: z.string().min(1, "Created date is required"),
-  updatedAt: z.string().min(1, "Updated date is required"),
+    .int(t("validation.wholeNumber"))
+    .min(0, t("validation.nonNegative"))
+    .max(10000, t("validation.maxBps")),
+  status: z.string().min(1, t("validation.statusRequired")),
+  createdAt: z.string().min(1, t("validation.createdAtRequired")),
+  updatedAt: z.string().min(1, t("validation.updatedAtRequired")),
 });
 
 export type Trade = z.infer<typeof TradeSchema>;
@@ -27,20 +42,20 @@ export type Trade = z.infer<typeof TradeSchema>;
 export const WalletSchema = z.object({
   balance: z
     .string()
-    .regex(/^\d+(\.\d+)?$/, "Balance must be a valid non-negative number"),
-  asset: z.string().min(1, "Asset code is required"),
+    .regex(/^\d+(\.\d+)?$/, t("validation.balanceNonNegative")),
+  asset: z.string().min(1, t("validation.assetRequired")),
 });
 
 export type Wallet = z.infer<typeof WalletSchema>;
 
 export const DisputeSchema = z.object({
-  tradeId: z.string().min(1, "Trade ID is required"),
+  tradeId: z.string().min(1, t("validation.tradeIdRequired")),
   reason: z
     .string()
-    .min(10, "Reason must be at least 10 characters")
-    .max(500, "Reason cannot exceed 500 characters"),
+    .min(10, t("validation.reasonMinLength"))
+    .max(500, t("validation.reasonMaxLength")),
   category: z.enum(["quality", "delivery", "payment", "fraud", "other"], {
-    message: "Invalid dispute category",
+    message: t("validation.invalidDisputeCategory"),
   }),
   evidenceCids: z.array(z.string().min(1)).optional(),
 });
@@ -50,17 +65,17 @@ export type Dispute = z.infer<typeof DisputeSchema>;
 export const ManifestSchema = z.object({
   driverName: z
     .string()
-    .min(2, "Driver name must be at least 2 characters")
-    .max(100, "Driver name cannot exceed 100 characters"),
+    .min(2, t("validation.driverNameMinLength"))
+    .max(100, t("validation.driverNameMaxLength")),
   driverPhone: z
     .string()
-    .regex(/^\+?[0-9\s\-().]{7,20}$/, "Invalid phone number format"),
+    .regex(/^\+?[0-9\s\-().]{7,20}$/, t("validation.invalidPhoneFormat")),
   licensePlate: z
     .string()
-    .min(2, "License plate must be at least 2 characters")
-    .max(20, "License plate cannot exceed 20 characters"),
-  vehicleType: z.string().max(50, "Vehicle type cannot exceed 50 characters").optional(),
-  notes: z.string().max(500, "Notes cannot exceed 500 characters").optional(),
+    .min(2, t("validation.licensePlateMinLength"))
+    .max(20, t("validation.licensePlateMaxLength")),
+  vehicleType: z.string().max(50, t("validation.vehicleTypeMaxLength")).optional(),
+  notes: z.string().max(500, t("validation.notesMaxLength")).optional(),
 });
 
 export type Manifest = z.infer<typeof ManifestSchema>;
@@ -103,7 +118,7 @@ export type NotificationPreferencesResponse = z.infer<
 >;
 
 export const ApiErrorSchema = z.object({
-  message: z.string().min(1, "Error message is required"),
+  message: z.string().min(1, t("validation.errorMessageRequired")),
   code: z.string().optional(),
   details: z.unknown().optional(),
 });

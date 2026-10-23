@@ -9,17 +9,60 @@
  * this copy and must not import the backend package directly.
  */
 import { z } from "zod";
+import { StrKey } from "@stellar/stellar-sdk";
 
-export const STELLAR_PUBLIC_KEY_REGEX = /^G[A-Z2-7]{55}$/;
+export const STELLAR_PUBLIC_KEY_REGEX = /^(G|C)[A-Z2-7]{55}$/;
+
+export function isValidStellarAddress(value: string): boolean {
+  const address = value.trim();
+  if (!address) return false;
+  if (address.startsWith("G")) return StrKey.isValidEd25519PublicKey(address);
+  if (address.startsWith("C")) return StrKey.isValidContract(address);
+  return false;
+}
 export const USDC_AMOUNT_REGEX = /^\d+(\.\d{1,7})?$/;
 export const LOSS_BPS_MIN = 0;
 export const LOSS_BPS_MAX = 10_000;
 export const LOSS_BPS_SUM = 10_000;
 export const DEFAULT_LOSS_BPS = 5_000;
 
+/**
+ * Canonical commodity unit enum. Agricultural trades are denominated in
+ * physical units (50kg bags of maize, metric tonnes of sorghum, crates of
+ * tomatoes, ...) so partial losses can be verified during Proof-of-Delivery
+ * disputes. Keep this list in sync with the backend copy.
+ */
+export const COMMODITY_UNITS = [
+  "kg",
+  "tonnes",
+  "bags_50kg",
+  "bags_100kg",
+  "crates",
+] as const;
+
+export type CommodityUnit = (typeof COMMODITY_UNITS)[number];
+
+export const commodityUnit = z.enum(COMMODITY_UNITS);
+
+/** Human-readable labels for rendering commodity units in the UI. */
+export const COMMODITY_UNIT_LABELS: Record<CommodityUnit, string> = {
+  kg: "Kilograms (kg)",
+  tonnes: "Metric tonnes (t)",
+  bags_50kg: "50kg bags",
+  bags_100kg: "100kg bags",
+  crates: "Crates",
+};
+
+/** Structured commodity quantity — a positive, finite number of units. */
+export const commodityQuantity = z
+  .number()
+  .positive("Quantity must be positive")
+  .finite("Quantity must be a finite number");
+
 export const stellarPublicKey = z
   .string()
-  .regex(STELLAR_PUBLIC_KEY_REGEX, "Invalid Stellar public key");
+  .trim()
+  .refine((value) => isValidStellarAddress(value), "Invalid Stellar address");
 
 export const lossBps = z
   .number()
@@ -52,8 +95,17 @@ export const createTradeInputSchema = z
     buyerLossBps: lossBps.optional(),
     sellerLossBps: lossBps.optional(),
     description: z.string().optional(),
+    quantity: commodityQuantity.optional(),
+    unit: commodityUnit.optional(),
   })
   .superRefine((data, ctx) => {
+    if ((data.quantity === undefined) !== (data.unit === undefined)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "quantity and unit must be provided together",
+        path: [data.quantity === undefined ? "quantity" : "unit"],
+      });
+    }
     const buyer = data.buyerLossBps ?? DEFAULT_LOSS_BPS;
     const seller = data.sellerLossBps ?? DEFAULT_LOSS_BPS;
     if (buyer + seller !== LOSS_BPS_SUM) {
@@ -80,6 +132,8 @@ export const tradeSchema = z.object({
   buyerLossBps: lossBps.optional(),
   sellerLossBps: lossBps.optional(),
   description: z.string().optional(),
+  quantity: commodityQuantity.optional(),
+  unit: commodityUnit.optional(),
   status: z.string(),
   createdAt: z.string().optional(),
 });
@@ -98,6 +152,8 @@ export interface TradeResponse {
   buyerLossBps?: number;
   sellerLossBps?: number;
   description?: string;
+  quantity?: number;
+  unit?: CommodityUnit;
   status: string;
   createdAt?: string;
 }
@@ -117,6 +173,8 @@ export function fromTradeResponse(response: TradeResponse): Trade {
     buyerLossBps: response.buyerLossBps,
     sellerLossBps: response.sellerLossBps,
     description: response.description,
+    quantity: response.quantity,
+    unit: response.unit,
     status: response.status,
     createdAt: response.createdAt,
   };
@@ -135,9 +193,32 @@ export function toTradeResponse(trade: Trade): TradeResponse {
     buyerLossBps: trade.buyerLossBps,
     sellerLossBps: trade.sellerLossBps,
     description: trade.description,
+    quantity: trade.quantity,
+    unit: trade.unit,
     status: trade.status,
     createdAt: trade.createdAt,
   };
+}
+
+/**
+ * Derive the unit price (amount per commodity unit) from a total amount and a
+ * quantity. Returns `null` when either input is missing or the quantity is not
+ * a positive finite number, so callers can render a placeholder instead of
+ * `Infinity`/`NaN`. The result is rounded to 7 decimal places to match the
+ * USDC precision used elsewhere in this schema.
+ */
+export function computeUnitPrice(
+  amount: string | number | null | undefined,
+  quantity: number | null | undefined,
+): number | null {
+  if (amount === null || amount === undefined) return null;
+  if (quantity === null || quantity === undefined) return null;
+  const parsedAmount = typeof amount === "number" ? amount : Number(amount);
+  if (!Number.isFinite(parsedAmount) || parsedAmount <= 0) return null;
+  if (!Number.isFinite(quantity) || quantity <= 0) return null;
+  const price = parsedAmount / quantity;
+  if (!Number.isFinite(price)) return null;
+  return Math.round(price * 1e7) / 1e7;
 }
 
 /** Flatten a ZodError into `{ field: message }` for form rendering. */

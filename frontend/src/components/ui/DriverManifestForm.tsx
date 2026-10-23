@@ -14,6 +14,36 @@ export interface DriverManifestData {
   licensePlate: string;
 }
 
+/**
+ * Normalizes phone numbers to E.164.
+ * Local Nigerian numbers (070..., 080..., 081..., 090..., 091...) automatically normalize to +234...
+ */
+export function normalizePhoneNumber(raw: string): string {
+  const clean = raw.trim().replace(/[\s\-()]/g, "");
+  if (/^0(70|80|81|90|91)\d{8}$/.test(clean)) {
+    return `+234${clean.slice(1)}`;
+  }
+  if (/^\+2340(70|80|81|90|91)\d{8}$/.test(clean)) {
+    return `+234${clean.slice(5)}`;
+  }
+  if (/^234(70|80|81|90|91)\d{8}$/.test(clean)) {
+    return `+${clean}`;
+  }
+  return clean;
+}
+
+export function isValidPhoneNumber(raw: string): boolean {
+  if (!raw || !raw.trim()) return false;
+  const normalized = normalizePhoneNumber(raw);
+  return /^\+[1-9]\d{7,14}$/.test(normalized);
+}
+
+export function isValidLicensePlate(raw: string): boolean {
+  const trimmed = raw.trim().toUpperCase();
+  if (!trimmed) return false;
+  return /^[A-Z]{2,3}[-\s]?[0-9]{2,4}(?:[-\s]?[A-Z]{1,2})?$/.test(trimmed);
+}
+
 interface DriverManifestFormProps {
   isOpen: boolean;
   onComplete: (data: DriverManifestData) => void;
@@ -25,7 +55,26 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
   const [driverName, setDriverName] = useState("");
   const [driverPhone, setDriverPhone] = useState("");
   const [licensePlate, setLicensePlate] = useState("");
-  const submitEnabled = driverName.trim() !== '' && driverPhone.trim() !== '' && licensePlate.trim() !== '';
+  const [touched, setTouched] = useState<{ phone?: boolean; plate?: boolean }>({});
+
+  const isPhoneValid = isValidPhoneNumber(driverPhone);
+  const isPlateValid = isValidLicensePlate(licensePlate);
+
+  const phoneError =
+    (touched.phone && !driverPhone.trim())
+      ? "Driver phone is required"
+      : (touched.phone || driverPhone.trim().length > 0) && !isPhoneValid
+        ? "Please enter a valid Nigerian or E.164 phone number (e.g. 0803... or +234...)"
+        : undefined;
+
+  const plateError =
+    touched.plate && !licensePlate.trim()
+      ? "Vehicle license plate is required"
+      : (touched.plate || licensePlate.trim().length > 0) && !isPlateValid
+        ? "Please enter a valid license plate (e.g. GEG 1123 H)"
+        : undefined;
+
+  const submitEnabled = driverName.trim() !== "" && isPhoneValid && isPlateValid;
 
   useEffect(() => {
     const bodyOverflow = document.body.style.overflow;
@@ -39,7 +88,6 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
     };
   }, [isOpen]);
 
-
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = formRef.current;
@@ -48,15 +96,22 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
       return;
     }
 
+    const normalizedPhone = normalizePhoneNumber(driverPhone);
+    if (!driverName.trim() || !isValidPhoneNumber(normalizedPhone) || !isValidLicensePlate(licensePlate)) {
+      setTouched({ phone: true, plate: true });
+      return;
+    }
+
     onComplete({
       driverName: driverName.trim(),
-      driverPhone: driverPhone.trim(),
+      driverPhone: normalizedPhone,
       licensePlate: licensePlate.trim(),
     });
 
     setDriverName("");
     setDriverPhone("");
     setLicensePlate("");
+    setTouched({});
 
     onDismiss?.();
   };
@@ -103,6 +158,7 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
                 label="Driver Phone"
                 name="driver-phone"
                 hint="Include country code for best routing"
+                error={phoneError}
                 required
               >
                 <input
@@ -111,19 +167,28 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
                   className="w-full rounded-xl border border-border-default bg-bg-input px-4 py-2 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/30"
                   value={driverPhone}
                   onChange={(event) => setDriverPhone(event.target.value)}
+                  onBlur={() => {
+                    setTouched((prev) => ({ ...prev, phone: true }));
+                    if (driverPhone.trim()) {
+                      const normalized = normalizePhoneNumber(driverPhone);
+                      if (normalized !== driverPhone.trim()) {
+                        setDriverPhone(normalized);
+                      }
+                    }
+                  }}
                   placeholder={translateCopy("ui.e_g_234_803_000_0000_a54ac33")}
-                  pattern="^\\+?[0-9\s-]{7,20}$"
                   required
                 />
               </FormField>
 
-              <FormField label="License Plate" name="license-plate" required>
+              <FormField label="License Plate" name="license-plate" error={plateError} required>
                 <input
                   type="text"
                   name="license-plate"
                   className="w-full rounded-xl border border-border-default bg-bg-input px-4 py-2 text-sm outline-none focus:border-gold focus:ring-2 focus:ring-gold/30"
                   value={licensePlate}
                   onChange={(event) => setLicensePlate(event.target.value)}
+                  onBlur={() => setTouched((prev) => ({ ...prev, plate: true }))}
                   placeholder={translateCopy("ui.e_g_geg_1123_h_814141c")}
                   required
                 />

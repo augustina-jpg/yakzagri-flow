@@ -5,11 +5,23 @@
 /*
  * Semantic Design Tokens
  * ──────────────────────
+ * Naming convention (single source of truth):
+ *   surface-*   backgrounds (surface-0..3)
+ *   elevated-*  elevated surfaces (aliases of surface-2)
+ *   card-*      card surfaces (aliases of surface-1)
+ *   text-*      foreground colors
+ *   border-*    border colors
+ *   shadow-*    elevation shadows
+ *
  * Surface / Elevation scale (light theme):
  *   surface-0  page canvas (deepest background)
  *   surface-1  card / panel
  *   surface-2  elevated surface — active rows, modals, dropdowns
  *   surface-3  overlay / scrim
+ *
+ * Deprecated aliases (do not use in new code):
+ *   bg-elevated, bg-bg-elevated, bg-card, bg-bg-card
+ *   → use bg-surface-1 (card) or bg-surface-2 (elevated)
  *
  * Text:
  *   text-primary    headings, strong emphasis
@@ -27,6 +39,17 @@
  *   shadow-elev-0..3
  */
 
+/* Canonical token aliases — one name per token. */
+:root {
+  --elevated-0: var(--surface-0);
+  --elevated-1: var(--surface-1);
+  --elevated-2: var(--surface-2);
+  --elevated-3: var(--surface-3);
+
+  --card: var(--surface-1);
+  --card-elevated: var(--surface-2);
+}
+
 body {
   background: var(--surface-0);
   color: var(--text-primary);
@@ -34,12 +57,17 @@ body {
     var(--font-geist-sans), var(--amana-font-family-sans);
 }
 
-/* ── Transitions for theme switching ─────────────────────────────────── */
-html.theme-transition,
-html.theme-transition *,
-html.theme-transition *::before,
-html.theme-transition *::after {
-  transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease !important;
+/* ── Utility aliases: enforce one name per token ─────────────────────── */
+@layer utilities {
+  .bg-elevated,
+  .bg-bg-elevated {
+    background-color: var(--surface-2);
+  }
+
+  .bg-card,
+  .bg-bg-card {
+    background-color: var(--surface-1);
+  }
 }
 
 @keyframes shimmer {

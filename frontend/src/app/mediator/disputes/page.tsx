@@ -96,7 +96,13 @@ export default function MediatorDisputesPage() {
 
   if (loading) {
     return (
-      <div className="px-6 py-8 max-w-6xl mx-auto" data-testid="mediator-disputes-page">
+      <div
+        className="px-6 py-8 max-w-6xl mx-auto"
+        data-testid="mediator-disputes-page"
+        role="status"
+        aria-busy="true"
+        aria-label="Loading mediator disputes queue"
+      >
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-3xl font-bold text-text-primary">{translateCopy("ui.mediator_disputes_b55890b")}</h2>
         </div>
@@ -183,6 +189,7 @@ export default function MediatorDisputesPage() {
           <Button
             variant="secondary"
             size="sm"
+            className="min-h-[44px] min-w-[44px]"
             onClick={() => setPage(Math.max(1, page - 1))}
             disabled={page === 1}
           >
@@ -194,6 +201,7 @@ export default function MediatorDisputesPage() {
           <Button
             variant="secondary"
             size="sm"
+            className="min-h-[44px] min-w-[44px]"
             onClick={() => setPage(Math.min(totalPages, page + 1))}
             disabled={page === totalPages}
           >

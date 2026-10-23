@@ -1,10 +1,16 @@
 import { renderHook, act } from '@testing-library/react';
-import { TradeProvider, useTrade } from '../TradeContext';
+import { TradeProvider, useTrade, TradeData } from '../TradeContext';
 
 describe('TradeContext', () => {
     const wrapper = ({ children }: { children: React.ReactNode }) => (
         <TradeProvider>{children}</TradeProvider>
     );
+
+    const createWrapper = (initialData?: Partial<TradeData>) => {
+        return ({ children }: { children: React.ReactNode }) => (
+            <TradeProvider initialData={initialData}>{children}</TradeProvider>
+        );
+    };
 
     describe('initialization', () => {
         it('should initialize with default values', () => {
@@ -23,6 +29,55 @@ describe('TradeContext', () => {
                 deliveryDays: '7',
                 notes: '',
             });
+        });
+
+        it('should seed state from initialData prop', () => {
+            const { result } = renderHook(() => useTrade(), {
+                wrapper: createWrapper({
+                    commodity: 'Maize',
+                    quantity: '500',
+                    unit: 'bags',
+                    pricePerUnit: '1000',
+                    sellerAddress: 'GABCDEFGHIJKLMNOPQRSTUVWXYZ012345678901234567890',
+                }),
+            });
+
+            expect(result.current.data.commodity).toBe('Maize');
+            expect(result.current.data.quantity).toBe('500');
+            expect(result.current.data.unit).toBe('bags');
+            expect(result.current.data.pricePerUnit).toBe('1000');
+            expect(result.current.data.sellerAddress).toBe(
+                'GABCDEFGHIJKLMNOPQRSTUVWXYZ012345678901234567890'
+            );
+            // Unspecified fields keep their defaults
+            expect(result.current.data.currency).toBe('NGN');
+            expect(result.current.data.buyerRatio).toBe(50);
+            expect(result.current.data.sellerRatio).toBe(50);
+            expect(result.current.data.deliveryDays).toBe('7');
+            expect(result.current.data.notes).toBe('');
+        });
+
+        it('should ignore undefined values in initialData', () => {
+            const { result } = renderHook(() => useTrade(), {
+                wrapper: createWrapper({ commodity: 'Rice', quantity: undefined }),
+            });
+
+            expect(result.current.data.commodity).toBe('Rice');
+            expect(result.current.data.quantity).toBe('');
+            expect(result.current.data.unit).toBe('kg');
+        });
+
+        it('should allow updates after seeding from initialData', () => {
+            const { result } = renderHook(() => useTrade(), {
+                wrapper: createWrapper({ commodity: 'Maize', quantity: '500' }),
+            });
+
+            act(() => {
+                result.current.update({ quantity: '750' });
+            });
+
+            expect(result.current.data.commodity).toBe('Maize');
+            expect(result.current.data.quantity).toBe('750');
         });
 
         it('should provide setStep function', () => {
@@ -177,6 +232,49 @@ describe('TradeContext', () => {
 
             expect(result.current.data.unit).toBe('tonnes');
         });
+
+        it('should update quantity and unit together', () => {
+            const { result } = renderHook(() => useTrade(), { wrapper });
+
+            act(() => {
+                result.current.update({ quantity: '50', unit: 'bags' });
+            });
+
+            expect(result.current.data.quantity).toBe('50');
+            expect(result.current.data.unit).toBe('bags');
+        });
+    });
+
+    describe('resetTradeWizard', () => {
+        it('resets all fields and the step and removes the persisted draft', () => {
+            localStorage.clear();
+            const { result } = renderHook(() => useTrade(), { wrapper });
+
+            act(() => {
+                result.current.update({ commodity: 'Maize', quantity: '200', notes: 'Test draft' });
+                result.current.setStep(3);
+            });
+            expect(localStorage.getItem('amana:draft-trade')).not.toBeNull();
+
+            act(() => {
+                result.current.resetTradeWizard();
+            });
+
+            expect(result.current.step).toBe(1);
+            expect(result.current.data).toEqual({
+                commodity: '',
+                quantity: '',
+                unit: 'kg',
+                pricePerUnit: '',
+                currency: 'NGN',
+                sellerAddress: '',
+                buyerRatio: 50,
+                sellerRatio: 50,
+                deliveryDays: '7',
+                notes: '',
+            });
+            expect(localStorage.getItem('amana:draft-trade')).toBeNull();
+        });
     });
 
     describe('edge cases', () => {
@@ -236,6 +334,23 @@ describe('TradeContext', () => {
                 result.current.update({ buyerRatio: 100 });
             });
             expect(result.current.data.buyerRatio).toBe(100);
+        });
+
+        it('should merge persisted draft over defaults and initialData', () => {
+            const { result } = renderHook(() => useTrade(), {
+                wrapper: createWrapper({ commodity: 'Maize', quantity: '500', unit: 'bags' }),
+            });
+
+            // Simulate a persisted draft that overrides some seeded fields
+            act(() => {
+                result.current.update({ quantity: '250', notes: 'Draft note' });
+            });
+
+            expect(result.current.data.commodity).toBe('Maize');
+            expect(result.current.data.quantity).toBe('250');
+            expect(result.current.data.unit).toBe('bags');
+            expect(result.current.data.notes).toBe('Draft note');
+            expect(result.current.data.currency).toBe('NGN');
         });
     });
 });

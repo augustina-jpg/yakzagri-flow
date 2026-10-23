@@ -11,6 +11,17 @@ const renderWithProvider = () => {
     );
 };
 
+// Helper to format a number as NGN currency string (matches component formatting)
+const formatNGN = (value: number) =>
+    `₦${value.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+const formatCNGN = (value: number) =>
+    `${value.toLocaleString('en-NG', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} cNGN`;
+
+// Default trade amount used by the TradeProvider in tests (Step 1 trade amount)
+const DEFAULT_TRADE_AMOUNT = 100000;
+=======
+
 describe('Step2Negotiation', () => {
     describe('loss ratio slider', () => {
         it('should render loss ratio slider', () => {
@@ -122,6 +133,146 @@ describe('Step2Negotiation', () => {
             renderWithProvider();
 
             expect(screen.getByText('Seller absorbs')).toBeInTheDocument();
+        });
+    });
+
+    describe('live payout preview', () => {
+        it('should render the payout preview card', () => {
+            renderWithProvider();
+
+            expect(screen.getByText(/payout preview/i)).toBeInTheDocument();
+        });
+
+        it('should compute 50/50 preset payout from trade amount', () => {
+            renderWithProvider();
+
+            const buyerRefund = DEFAULT_TRADE_AMOUNT * 0.5;
+            const sellerPayout = DEFAULT_TRADE_AMOUNT * 0.5;
+
+            expect(screen.getByText(formatNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatNGN(sellerPayout))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(sellerPayout))).toBeInTheDocument();
+        });
+
+        it('should compute 70/30 preset payout when preset button clicked', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            await user.click(screen.getByRole('button', { name: '70/30' }));
+
+            const buyerRefund = DEFAULT_TRADE_AMOUNT * 0.7;
+            const sellerPayout = DEFAULT_TRADE_AMOUNT * 0.3;
+
+            expect(screen.getByText(formatNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatNGN(sellerPayout))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(sellerPayout))).toBeInTheDocument();
+        });
+
+        it('should compute 80/20 preset payout when preset button clicked', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            await user.click(screen.getByRole('button', { name: '80/20' }));
+
+            const buyerRefund = DEFAULT_TRADE_AMOUNT * 0.8;
+            const sellerPayout = DEFAULT_TRADE_AMOUNT * 0.2;
+
+            expect(screen.getByText(formatNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatNGN(sellerPayout))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(sellerPayout))).toBeInTheDocument();
+        });
+
+        it('should compute 100/0 preset payout when preset button clicked', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            await user.click(screen.getByRole('button', { name: '100/0' }));
+
+            const buyerRefund = DEFAULT_TRADE_AMOUNT;
+            const sellerPayout = 0;
+
+            expect(screen.getByText(formatNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatNGN(sellerPayout))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(sellerPayout))).toBeInTheDocument();
+        });
+
+        it('should compute 50/50 preset payout when preset button clicked', async () => {
+            const user = userEvent.setup();
+            renderWithProvider();
+
+            // Change away first, then back to 50/50
+            await user.click(screen.getByRole('button', { name: '80/20' }));
+            await user.click(screen.getByRole('button', { name: '50/50' }));
+
+            const buyerRefund = DEFAULT_TRADE_AMOUNT * 0.5;
+            const sellerPayout = DEFAULT_TRADE_AMOUNT * 0.5;
+
+            expect(screen.getByText(formatNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatNGN(sellerPayout))).toBeInTheDocument();
+        });
+
+        it('should update payout preview on custom slider adjustment', () => {
+            renderWithProvider();
+
+            const slider = screen.getByRole('slider');
+            fireEvent.change(slider, { target: { value: '65' } });
+
+            const buyerRefund = DEFAULT_TRADE_AMOUNT * 0.65;
+            const sellerPayout = DEFAULT_TRADE_AMOUNT * 0.35;
+
+            expect(screen.getByText(formatNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatNGN(sellerPayout))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(sellerPayout))).toBeInTheDocument();
+        });
+
+        it('should compute total loss payout (100% buyer) on custom slider', () => {
+            renderWithProvider();
+
+            const slider = screen.getByRole('slider');
+            fireEvent.change(slider, { target: { value: '100' } });
+
+            expect(screen.getByText(formatNGN(DEFAULT_TRADE_AMOUNT))).toBeInTheDocument();
+            expect(screen.getByText(formatNGN(0))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(DEFAULT_TRADE_AMOUNT))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(0))).toBeInTheDocument();
+        });
+
+        it('should compute zero buyer payout (0% buyer) on custom slider', () => {
+            renderWithProvider();
+
+            const slider = screen.getByRole('slider');
+            fireEvent.change(slider, { target: { value: '0' } });
+
+            expect(screen.getByText(formatNGN(0))).toBeInTheDocument();
+            expect(screen.getByText(formatNGN(DEFAULT_TRADE_AMOUNT))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(0))).toBeInTheDocument();
+            expect(screen.getByText(formatCNGN(DEFAULT_TRADE_AMOUNT))).toBeInTheDocument();
+        });
+
+        it('should keep buyer refund and seller payout summing to trade amount', () => {
+            renderWithProvider();
+
+            const slider = screen.getByRole('slider');
+            fireEvent.change(slider, { target: { value: '35' } });
+
+            const buyerRefund = DEFAULT_TRADE_AMOUNT * 0.35;
+            const sellerPayout = DEFAULT_TRADE_AMOUNT * 0.65;
+
+            expect(buyerRefund + sellerPayout).toBeCloseTo(DEFAULT_TRADE_AMOUNT, 2);
+            expect(screen.getByText(formatNGN(buyerRefund))).toBeInTheDocument();
+            expect(screen.getByText(formatNGN(sellerPayout))).toBeInTheDocument();
+        });
+
+        it('should display buyer refund and seller payout labels', () => {
+            renderWithProvider();
+
+            expect(screen.getByText(/buyer refund/i)).toBeInTheDocument();
+            expect(screen.getByText(/seller payout/i)).toBeInTheDocument();
         });
     });
 

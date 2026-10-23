@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import React from 'react';
 import Step3Review from '../steps/Step3Review';
@@ -6,6 +6,7 @@ import { TradeProvider, useTrade, TradeData } from '../TradeContext';
 import { api } from '@/lib/api';
 import { signTransaction } from '@stellar/freighter-api';
 import { _clearAllForTests } from '@/lib/actionDedup';
+import { useXdrExpiry } from '@/hooks/useXdrExpiry';
 
 // Mock @stellar/stellar-sdk to simplify address validation in tests
 jest.mock('@stellar/stellar-sdk', () => ({
@@ -161,11 +162,37 @@ describe('Step3Review', () => {
             expect(quantityRow).toHaveTextContent('kg');
         });
 
+        it('should display structured quantity and unit breakdown', () => {
+            renderWithProvider({
+                commodity: 'Maize',
+                quantity: '100',
+                unit: 'bags',
+                pricePerUnit: '10',
+            });
+
+            const quantityRow = screen.getByText('Quantity').closest('div');
+            expect(quantityRow).toHaveTextContent('100');
+            expect(quantityRow).toHaveTextContent('bags');
+        });
+
         it('should display price per unit with currency', () => {
             renderWithProvider();
 
             const priceRow = screen.getByText('Price per unit').closest('div');
             expect(priceRow).toHaveTextContent('NGN');
+        });
+
+        it('should display automatically computed unit price', () => {
+            renderWithProvider({
+                commodity: 'Maize',
+                quantity: '100',
+                unit: 'bags',
+                pricePerUnit: '10',
+            });
+
+            const priceRow = screen.getByText('Price per unit').closest('div');
+            expect(priceRow).toHaveTextContent('NGN');
+            expect(priceRow).toHaveTextContent('10');
         });
 
         it('should display total value', () => {
@@ -201,6 +228,29 @@ describe('Step3Review', () => {
 
             const deliveryRow = screen.getByText('Delivery Window').closest('div');
             expect(deliveryRow).toHaveTextContent('7 days');
+        });
+
+        it('should display relative delivery window summary from trade context', () => {
+            const futureDate = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
+            renderWithProvider({ deliveryDate: futureDate });
+
+            const deliveryRow = screen.getByText('Delivery Window').closest('div');
+            expect(deliveryRow).toHaveTextContent(/In 5 days/i);
+        });
+
+        it('should display relative duration for a near-term delivery date', () => {
+            const futureDate = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString();
+            renderWithProvider({ deliveryDate: futureDate });
+
+            const deliveryRow = screen.getByText('Delivery Window').closest('div');
+            expect(deliveryRow).toHaveTextContent(/In 2 hours/i);
+        });
+
+        it('should fall back to delivery days when no delivery date is set', () => {
+            renderWithProvider({ deliveryDays: '14' });
+
+            const deliveryRow = screen.getByText('Delivery Window').closest('div');
+            expect(deliveryRow).toHaveTextContent('14 days');
         });
 
         it('should display notes when present', () => {
@@ -325,6 +375,50 @@ describe('Step3Review', () => {
 
             const loadingButton = screen.getByRole('button', { name: /creating trade/i });
             expect(loadingButton).toBeDisabled();
+        });
+
+        it('should submit once when the disclaimer is accepted twice before rendering', async () => {
+            const user = userEvent.setup();
+            let resolveSigning!: (value: { signedTxXdr: string }) => void;
+            (signTransaction as jest.Mock).mockReturnValue(new Promise((resolve) => {
+                resolveSigning = resolve;
+            }));
+            renderWithProvider(validData);
+
+            await user.click(screen.getByRole('button', { name: /lock funds & create trade/i }));
+            const acceptButton = screen.getByRole('button', { name: /accept/i });
+            act(() => {
+                const click = () => acceptButton.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+                click();
+                click();
+            });
+
+            await waitFor(() => expect(signTransaction).toHaveBeenCalledTimes(1));
+            expect(api.trades.create).toHaveBeenCalledTimes(1);
+            await act(async () => {
+                resolveSigning({ signedTxXdr: 'signed-xdr' });
+            });
+        });
+
+        it('should release the submit lock when wallet signing is rejected', async () => {
+            const user = userEvent.setup();
+            (signTransaction as jest.Mock)
+                .mockRejectedValueOnce(new Error('User rejected'))
+                .mockResolvedValueOnce({ signedTxXdr: 'signed-xdr' });
+            renderWithProvider(validData);
+
+            await user.click(screen.getByRole('button', { name: /lock funds & create trade/i }));
+            await user.click(screen.getByRole('button', { name: /accept/i }));
+            await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('User rejected'));
+
+            _clearAllForTests();
+            await user.click(screen.getByRole('button', { name: /lock funds & create trade/i }));
+            await user.click(screen.getByRole('button', { name: /accept/i }));
+
+            await waitFor(() => {
+                expect(api.trades.create).toHaveBeenCalledTimes(2);
+                expect(signTransaction).toHaveBeenCalledTimes(2);
+            });
         });
     });
 
@@ -467,6 +561,26 @@ describe('Step3Review', () => {
             expect(valueSpan?.textContent).toBe(' kg');
         });
 
+        it('should handle quantity with unit but no amount', () => {
+            renderWithProvider({ unit: 'crates' });
+
+            const quantityRow = screen.getByText('Quantity').closest('div');
+            expect(quantityRow).toHaveTextContent('crates');
+        });
+
+        it('should handle metric ton unit', () => {
+            renderWithProvider({
+                commodity: 'Sorghum',
+                quantity: '5',
+                unit: 'metric tons',
+                pricePerUnit: '250',
+            });
+
+            const quantityRow = screen.getByText('Quantity').closest('div');
+            expect(quantityRow).toHaveTextContent('5');
+            expect(quantityRow).toHaveTextContent('metric tons');
+        });
+
         it('should handle empty price', () => {
             renderWithProvider();
 
@@ -557,5 +671,102 @@ describe('Step3Review', () => {
             expect(simSection).toHaveTextContent(/CPU Instructions:/i);
             expect(simSection).toHaveTextContent(/Ledger I\/O:/i);
         });
+    });
+
+    describe('XDR expiration countdown', () => {
+        const validData = {
+            commodity: 'Maize',
+            quantity: '100',
+            pricePerUnit: '10',
+            sellerAddress: 'GBRP4ZDXSS6NZPMTVNE7DZ47JNV7OFPJMIVG4FDCMNZP7CHH4656YEXI',
+            buyerRatio: 50,
+            sellerRatio: 50,
+            deliveryDays: '7',
+            notes: 'Some notes',
+        };
+
+        beforeEach(() => {
+            jest.useFakeTimers();
+        });
+
+        afterEach(() => {
+            jest.useRealTimers();
+        });
+
+        it('shows remaining validity, then disables sign and offers refresh once expired', async () => {
+            const user = userEvent.setup({ advanceTimers: jest.advanceTimersByTime });
+            const nowSeconds = Math.floor(Date.now() / 1000);
+            const maxTime = nowSeconds + 10;
+
+            (api.trades.create as jest.Mock).mockResolvedValue({
+                tradeId: 'trade-123',
+                unsignedXdr: 'mock-xdr',
+                maxTime,
+            });
+
+            renderWithProvider(validData);
+
+            await user.click(screen.getByRole('button', { name: /lock funds & create trade/i }));
+            await user.click(screen.getByRole('button', { name: /accept/i }));
+
+            // Prepared XDR is now available; countdown badge should be visible.
+            await waitFor(() => expect(screen.getByTestId('xdr-expiry-badge')).toBeInTheDocument());
+            expect(screen.getByTestId('xdr-expiry-badge')).toHaveTextContent(/10s|9s/);
+
+            const signButton = screen.getByRole('button', { name: /sign & submit/i });
+            expect(signButton).not.toBeDisabled();
+
+            // Advance past expiration.
+            act(() => {
+                jest.advanceTimersByTime(11_000);
+            });
+
+            await waitFor(() => {
+                expect(screen.getByRole('button', { name: /refresh quote \/ xdr/i })).toBeInTheDocument();
+            });
+            expect(screen.queryByRole('button', { name: /sign & submit/i })).not.toBeInTheDocument();
+        });
+    });
+});
+
+describe('useXdrExpiry', () => {
+    beforeEach(() => {
+        jest.useFakeTimers();
+    });
+
+    afterEach(() => {
+        jest.useRealTimers();
+    });
+
+    const Harness = ({ maxTime }: { maxTime: number | null | undefined }) => {
+        const { secondsRemaining, isExpired } = useXdrExpiry(maxTime);
+        return (
+            <div>
+                <span data-testid="remaining">{secondsRemaining}</span>
+                <span data-testid="expired">{String(isExpired)}</span>
+            </div>
+        );
+    };
+
+    it('transitions from counting down to expired', () => {
+        const nowSeconds = Math.floor(Date.now() / 1000);
+        const maxTime = nowSeconds + 5;
+
+        render(<Harness maxTime={maxTime} />);
+
+        expect(screen.getByTestId('expired')).toHaveTextContent('false');
+        expect(Number(screen.getByTestId('remaining').textContent)).toBeGreaterThan(0);
+
+        act(() => {
+            jest.advanceTimersByTime(6_000);
+        });
+
+        expect(screen.getByTestId('expired')).toHaveTextContent('true');
+        expect(screen.getByTestId('remaining')).toHaveTextContent('0');
+    });
+
+    it('reports not expired when maxTime is absent', () => {
+        render(<Harness maxTime={null} />);
+        expect(screen.getByTestId('expired')).toHaveTextContent('false');
     });
 });

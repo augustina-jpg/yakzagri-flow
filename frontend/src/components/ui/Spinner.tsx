@@ -24,7 +24,7 @@ export function Spinner({
       aria-label={ariaLabel}
       className={clsx(
         "inline-block rounded-full border-2 border-transparent border-t-gold",
-        "animate-spin motion-reduce:animate-none",
+        "motion-safe:animate-spin motion-reduce:animate-none",
         SIZE_CLASSES[size],
         className,
       )}

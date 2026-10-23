@@ -1,58 +1,114 @@
-import { readSavedNetwork } from "@/lib/preferences";
-
-const DEFAULT_API_BASE_URL = "http://localhost:4000";
-
-export function getApiBaseUrl(): string {
-  return process.env.NEXT_PUBLIC_API_URL || DEFAULT_API_BASE_URL;
-}
+import { z } from "zod";
 
 /**
- * Version prefix prepended to consumer-facing API paths.
+ * Runtime environment configuration for the frontend.
  *
- * Defaults to `/api/v1` — the stable, versioned backend lane. Set to an empty
- * string (e.g. `NEXT_PUBLIC_API_VERSION_PREFIX=`) to keep calling the legacy
- * unversioned aliases. The backend serves both lanes, so reverting is a
- * no-deploy backend change.
- *
- * Admin (/admin, /api/admin) and health endpoints are always unversioned and
- * never receive this prefix.
+ * All values are read from `NEXT_PUBLIC_*` variables, which Next.js inlines
+ * into the browser bundle at build time. This module parses and validates
+ * them once at startup so misconfiguration surfaces as a clear diagnostic
+ * error instead of a confusing runtime failure deep in the app.
  */
-export function getApiVersionPrefix(): string {
-  return process.env.NEXT_PUBLIC_API_VERSION_PREFIX || "/api/v1";
+
+const stellarNetworkSchema = z.enum(["testnet", "mainnet", "futurenet"]);
+
+const appEnvSchema = z.enum(["development", "staging", "production"]);
+
+const urlSchema = z
+  .string()
+  .trim()
+  .url({ message: "must be a valid URL" });
+
+const optionalUrlSchema = z
+  .string()
+  .trim()
+  .optional()
+  .transform((value) => (value === "" ? undefined : value))
+  .pipe(urlSchema.optional());
+
+const booleanStringSchema = z
+  .enum(["true", "false"])
+  .transform((value) => value === "true");
+
+const envSchema = z.object({
+  API_BASE_URL: urlSchema,
+  STELLAR_NETWORK: stellarNetworkSchema,
+  RPC_URL: urlSchema,
+  CONTRACT_ID: z.string().trim().optional(),
+  NGN_ISSUER: z.string().trim().optional(),
+  FREIGHTER_ENABLED: booleanStringSchema,
+  API_VERSION_PREFIX: z.string().trim(),
+  SUPABASE_URL: optionalUrlSchema,
+  SUPABASE_ANON_KEY: z.string().trim().optional(),
+  ADMIN_WALLETS: z.string().trim().optional(),
+  ALBEDO_URL: urlSchema,
+  APP_ENV: appEnvSchema,
+  PINATA_GATEWAY: optionalUrlSchema,
+});
+
+export type Env = z.infer<typeof envSchema>;
+
+const DEFAULT_RPC_URLS: Record<z.infer<typeof stellarNetworkSchema>, string> = {
+  testnet: "https://soroban-testnet.stellar.org",
+  mainnet: "https://soroban-mainnet.stellar.org",
+  futurenet: "https://rpc-futurenet.stellar.org",
+};
+
+function readRawEnv(): Record<string, string | undefined> {
+  const rawNetwork = process.env.NEXT_PUBLIC_STELLAR_NETWORK?.trim() || "testnet";
+  const defaultRpc =
+    DEFAULT_RPC_URLS[rawNetwork as z.infer<typeof stellarNetworkSchema>] ??
+    DEFAULT_RPC_URLS.testnet;
+
+  return {
+    API_BASE_URL:
+      process.env.NEXT_PUBLIC_API_BASE_URL?.trim() ||
+      process.env.NEXT_PUBLIC_API_URL?.trim() ||
+      "http://localhost:4000",
+    STELLAR_NETWORK: rawNetwork,
+    RPC_URL:
+      process.env.NEXT_PUBLIC_RPC_URL?.trim() ||
+      process.env.NEXT_PUBLIC_STELLAR_RPC_URL?.trim() ||
+      defaultRpc,
+    CONTRACT_ID: process.env.NEXT_PUBLIC_CONTRACT_ID,
+    NGN_ISSUER: process.env.NEXT_PUBLIC_NGN_ISSUER,
+    FREIGHTER_ENABLED: process.env.NEXT_PUBLIC_FREIGHTER_ENABLED?.trim() || "true",
+    API_VERSION_PREFIX: process.env.NEXT_PUBLIC_API_VERSION_PREFIX?.trim() ?? "/api/v1",
+    SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    ADMIN_WALLETS: process.env.NEXT_PUBLIC_ADMIN_WALLETS,
+    ALBEDO_URL: process.env.NEXT_PUBLIC_ALBEDO_URL?.trim() || "https://albedo.link",
+    APP_ENV: process.env.NEXT_PUBLIC_APP_ENV?.trim() || "development",
+    PINATA_GATEWAY: process.env.NEXT_PUBLIC_PINATA_GATEWAY,
+  };
 }
 
-export function getStellarRpcUrl(): string {
-  const network = readSavedNetwork();
-  if (network === "mainnet") return "https://mainnet.sorobanrpc.com";
-  if (network === "testnet") return "https://soroban-testnet.stellar.org";
-  return (
-    process.env.NEXT_PUBLIC_STELLAR_RPC_URL ||
-    process.env.NEXT_PUBLIC_RPC_URL ||
-    "https://soroban-testnet.stellar.org"
-  );
+function formatIssues(error: z.ZodError): string {
+  return error.issues
+    .map((issue) => {
+      const path = issue.path.join(".");
+      return `  - ${path}: ${issue.message}`;
+    })
+    .join("\n");
 }
 
-export function getStellarNetworkPassphrase(): string {
-  const network = readSavedNetwork();
-  if (network === "mainnet") return "Public Global Stellar Network ; September 2015";
-  const passphrase =
-    process.env.NEXT_PUBLIC_STELLAR_NETWORK ||
-    "Test SDF Network ; September 2015";
+function parseEnv(): Env {
+  const result = envSchema.safeParse(readRawEnv());
 
-  // Validate that it's a real passphrase, not a shorthand like 'testnet' or 'public'
-  // Real passphrases contain separators (spaces, semicolons, periods) characteristic of full network names
-  // e.g., "Test SDF Network ; September 2015", "Public Global Stellar Network ; September 2015"
-  if (
-    passphrase.toLowerCase() === "testnet" ||
-    passphrase.toLowerCase() === "public" ||
-    passphrase.toLowerCase() === "mainnet"
-  ) {
+  if (!result.success) {
     throw new Error(
-      `Invalid Stellar network passphrase: "${passphrase}". ` +
-      `Expected a full passphrase like "Test SDF Network ; September 2015" or "Public Global Stellar Network ; September 2015". ` +
-      `Set NEXT_PUBLIC_STELLAR_NETWORK_PASSPHRASE in your environment.`
+      `Invalid NEXT_PUBLIC_* environment configuration:\n${formatIssues(
+        result.error,
+      )}\n\nCheck your .env.local against .env.example.`,
     );
   }
 
-  return passphrase;
+  return result.data;
 }
+
+/**
+ * Validated, typed environment configuration. Parsed once at module load so
+ * misconfiguration fails fast with a clear diagnostic message.
+ */
+export const env: Env = parseEnv();
+
+export default env;

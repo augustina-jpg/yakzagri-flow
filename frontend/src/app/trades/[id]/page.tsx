@@ -15,6 +15,7 @@ import { getMediatorAddresses, isMediatorAddress } from "@/app/mediator/disputes
 import { formatDateTime } from "@/lib/i18n/format";
 import { getOrCreateIdempotencyKey, clearIdempotencyKey } from "@/lib/idempotency";
 import { broadcastTransaction } from "@/lib/stellar/broadcast";
+import { XdrCountdownBadge } from "@/components/stellar/XdrCountdownBadge";
 import {
   Modal,
   ModalContent,
@@ -26,7 +27,8 @@ import {
 } from "@/components/ui/Modal";
 import { ConfirmActionModal } from "@/components/ui/ConfirmActionModal";
 import { StatusBadge } from "@/components/ui/StatusBadge";
-import { useToast } from "@/components/ui/Toast";
+import { NextActionCallout } from "@/components/trades/NextActionCallout";
+import { resolveNextAction } from "@/lib/trades/nextAction";
 
 function formatDate(dateString: string) {
   return formatDateTime(dateString);
@@ -95,17 +97,30 @@ export default function TradeDetailPage() {
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-  const [cancelOpen, setCancelOpen] = useState(false);
+  const [actionProgress, setActionProgress] = useState<string | null>(null);
+  const [confirmedTx, setConfirmedTx] = useState<{
+    hash: string;
+    ledger: number | null;
+  } | null>(null);
   const [disputeOpen, setDisputeOpen] = useState(false);
   const [disputeReason, setDisputeReason] = useState("");
   const [disputeCategory, setDisputeCategory] = useState<DisputeCategory>("delivery");
   const [disputeError, setDisputeError] = useState<string | null>(null);
+  const [pendingXdr, setPendingXdr] = useState<string | null>(null);
+  const [xdrExpired, setXdrExpired] = useState(false);
+  const [lastAction, setLastAction] = useState<{
+    label: string;
+    action: string;
+    apiCall: (options: { idempotencyKey: string }) => Promise<{ unsignedXdr: string }>;
+  } | null>(null);
 
   const role: UserRole = trade
     ? deriveRole(address, trade.buyerAddress, trade.sellerAddress)
     : "observer";
 
   const status = (trade?.status ?? "").toUpperCase();
+
+  const nextAction = trade ? resolveNextAction(role, status) : null;
 
   async function runAction(
     label: string,
@@ -117,12 +132,15 @@ export default function TradeDetailPage() {
     setActionLoading(true);
     setActionError(null);
     setActionSuccess(null);
+    setXdrExpired(false);
+    setLastAction({ label, action, apiCall });
 
     const scopeKey = `${action}:${tradeId}`;
     const idempotencyKey = getOrCreateIdempotencyKey(address, scopeKey);
 
     try {
       const { unsignedXdr } = await apiCall({ idempotencyKey });
+      setPendingXdr(unsignedXdr);
       const networkPassphrase = apiConfig.getStellarNetworkPassphrase();
 
       const result = await signTransaction(unsignedXdr, {
@@ -146,6 +164,7 @@ export default function TradeDetailPage() {
       const { hash: txHash } = await broadcastTransaction(signedTxXdr);
 
       if (scopeKey) clearIdempotencyKey(address, scopeKey);
+      setPendingXdr(null);
       setActionSuccess(
         txHash
           ? `${label} completed successfully. Transaction: ${txHash}`
@@ -177,6 +196,13 @@ export default function TradeDetailPage() {
     } finally {
       setActionLoading(false);
     }
+  }
+
+  function handleRefreshTransaction() {
+    if (!lastAction) return;
+    setPendingXdr(null);
+    setXdrExpired(false);
+    void runAction(lastAction.label, lastAction.action, lastAction.apiCall);
   }
 
   function handleDeposit() {
@@ -253,11 +279,22 @@ export default function TradeDetailPage() {
 
       {/* Loading state */}
       {loading && (
-        <div className="flex items-center justify-center py-12">
-          <svg className="animate-spin w-8 h-8 text-gold" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="12" cy="12" r="10" strokeOpacity="0.25" />
-            <path d="M12 2a10 10 0 0 1 10 10" />
-          </svg>
+        <div role="status" aria-busy="true" aria-label="Loading trade details" className="space-y-4 py-4">
+          <div className="rounded-lg border border-border-default bg-bg-secondary p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div className="h-6 w-40 animate-pulse rounded bg-bg-tertiary" />
+              <div className="h-6 w-24 animate-pulse rounded-full bg-bg-tertiary" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-2">
+              <div className="h-16 animate-pulse rounded bg-bg-tertiary" />
+              <div className="h-16 animate-pulse rounded bg-bg-tertiary" />
+              <div className="h-16 animate-pulse rounded bg-bg-tertiary" />
+            </div>
+          </div>
+          <div className="rounded-lg border border-border-default bg-bg-secondary p-6 space-y-3">
+            <div className="h-5 w-32 animate-pulse rounded bg-bg-tertiary" />
+            <div className="h-12 w-full animate-pulse rounded bg-bg-tertiary" />
+          </div>
         </div>
       )}
 
@@ -345,21 +382,69 @@ export default function TradeDetailPage() {
               {actionError}
             </div>
           )}
-          {actionSuccess && (
-            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
-              {actionSuccess}
+          {actionProgress && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="rounded-lg border border-border-default bg-bg-card px-4 py-3 text-sm text-text-secondary"
+            >
+              {actionProgress}
             </div>
           )}
+          {actionSuccess && (
+            <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-400">
+              <p>{actionSuccess}</p>
+              {confirmedTx && (
+                <p className="mt-1 text-xs">
+                  <a
+                    href={getTxExplorerUrl(confirmedTx.hash)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline hover:text-emerald-300"
+                  >
+                    {confirmedTx.hash}
+                  </a>
+                  {confirmedTx.ledger !== null && (
+                    <span className="ml-2 text-text-muted">
+                      Ledger #{confirmedTx.ledger}
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Next required action callout */}
+          {nextAction && <NextActionCallout action={nextAction} role={role} />}
 
           {/* Role-based action buttons */}
           {isAuthenticated && (
             <div className="rounded-lg border border-border-default bg-bg-card p-5">
               <p className="text-xs uppercase tracking-wide text-text-muted mb-4">{translateCopy("ui.actions_c3cd636")}</p>
+              {pendingXdr && (
+                <div className="mb-4 flex flex-wrap items-center gap-3">
+                  <XdrCountdownBadge
+                    xdr={pendingXdr}
+                    onExpired={() => setXdrExpired(true)}
+                  />
+                  {xdrExpired && (
+                    <button
+                      type="button"
+                      onClick={handleRefreshTransaction}
+                      disabled={actionLoading}
+                      data-testid="action-refresh-transaction"
+                      className="rounded-lg border border-gold px-3 py-1.5 text-xs font-semibold text-gold transition-colors hover:bg-gold/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {translateCopy("ui.refresh_transaction")}
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="flex flex-wrap gap-3">
                 {role === "buyer" && status === "PENDING" && (
                   <button
                     onClick={handleDeposit}
-                    disabled={actionLoading}
+                    disabled={actionLoading || xdrExpired}
                     data-testid="action-deposit"
                     className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-text-inverse transition-colors hover:bg-gold-hover disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -370,7 +455,7 @@ export default function TradeDetailPage() {
                 {role === "buyer" && status === "FUNDED" && (
                   <button
                     onClick={handleConfirmDelivery}
-                    disabled={actionLoading}
+                    disabled={actionLoading || xdrExpired}
                     data-testid="action-confirm-delivery"
                     className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-text-inverse transition-colors hover:bg-gold-hover disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -381,7 +466,7 @@ export default function TradeDetailPage() {
                 {role === "seller" && (status === "FUNDED" || status === "CONFIRMED") && (
                   <button
                     onClick={handleReleaseFunds}
-                    disabled={actionLoading}
+                    disabled={actionLoading || xdrExpired}
                     data-testid="action-release-funds"
                     className="rounded-lg bg-gold px-4 py-2 text-sm font-semibold text-text-inverse transition-colors hover:bg-gold-hover disabled:opacity-50 disabled:cursor-not-allowed"
                   >
@@ -526,7 +611,7 @@ export default function TradeDetailPage() {
               </button>
               <button
                 type="submit"
-                disabled={actionLoading}
+                disabled={actionLoading || xdrExpired}
                 className="rounded-lg bg-status-danger px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
               >
                 {actionLoading ? translateCopy("ui.processing") : translateCopy("ui.dispute_submit")}

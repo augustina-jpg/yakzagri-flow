@@ -146,7 +146,7 @@ function TransactionHash({ hash, explorerUrl }: TransactionHashProps) {
           <code className="text-sm font-mono text-text-secondary">{truncatedHash}</code>
           <button
             onClick={handleCopy}
-            className="p-1 hover:bg-bg-elevated rounded transition-colors"
+            className="p-1 hover:bg-surface-elevated rounded transition-colors"
             aria-label={translateCopy("ui.copy_transaction_hash_964170c")}
           >
             {copied ? (
@@ -231,7 +231,7 @@ export function SuccessState({
         onClick={onBackdropClick}
       >
         <div
-          className={`bg-bg-card border border-border-default rounded-2xl p-8 max-w-md w-full mx-4 shadow-modal relative ${className || ""}`}
+          className={`bg-surface-card border border-border-default rounded-2xl p-8 max-w-md w-full mx-4 shadow-modal relative ${className || ""}`}
           onClick={(e) => e.stopPropagation()}
         >
           {/* Icon with optional sparkles */}
@@ -305,7 +305,7 @@ export function SuccessState({
 
       {/* Transaction details card */}
       {transactionDetails && (
-        <div className="w-full max-w-2xl bg-bg-card border border-border-default rounded-2xl p-6 mb-8 relative overflow-hidden">
+        <div className="w-full max-w-2xl bg-surface-card border border-border-default rounded-2xl p-6 mb-8 relative overflow-hidden">
           {/* Watermark logo */}
           <div className="absolute bottom-4 right-4 w-24 h-24 opacity-10">
             <svg viewBox="0 0 100 100" fill="currentColor" className="text-text-muted">

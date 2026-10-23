@@ -2,7 +2,7 @@
 import { t as translateCopy } from "@/lib/i18n";
 
 
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 interface VirtualizedListProps<T> {
@@ -22,14 +22,27 @@ interface VirtualizedListProps<T> {
   isEmpty?: boolean;
   /** Empty state render. */
   emptyState?: React.ReactNode;
+  /**
+   * Row count at or below which the list renders all rows without
+   * virtualization. Keeps small tables (e.g. <50 trades) simple and avoids
+   * the overhead of a scroll container. Defaults to 50.
+   */
+  virtualizationThreshold?: number;
 }
 
 /**
  * Virtualized list component that only renders visible rows for optimal
  * performance with large datasets (10k+ rows).
  *
- * Preserves scroll position and supports keyboard/screen-reader semantics
- * via aria attributes on the scroll container.
+ * Preserves scroll position and supports keyboard/screen-reader semantics:
+ * - Container carries role="list", aria-rowcount (total items), and tabIndex=0
+ * - Each rendered row carries role="listitem", aria-posinset (1-indexed position
+ *   within the full list), and aria-setsize (total item count) so screen readers
+ *   announce "item N of M" even though only a slice is in the DOM.
+ * - PageUp / PageDown keyboard events scroll the container by one visible page.
+ *
+ * Lists at or below `virtualizationThreshold` rows render in full so small
+ * trade tables keep their natural layout; larger lists are virtualized.
  *
  * Usage:
  * ```tsx
@@ -51,8 +64,11 @@ export function VirtualizedList<T>({
   className,
   isEmpty = false,
   emptyState,
+  virtualizationThreshold = 50,
 }: VirtualizedListProps<T>) {
   const parentRef = useRef<HTMLDivElement>(null);
+
+  const shouldVirtualize = items.length > virtualizationThreshold;
 
   const virtualizer = useVirtualizer({
     count: items.length,
@@ -63,7 +79,7 @@ export function VirtualizedList<T>({
 
   const totalHeight = Math.min(items.length * rowHeight, maxHeight);
 
-  if (isEmpty) {
+  if (isEmpty || items.length === 0) {
     return (
       <div className={className} role="list" aria-label={translateCopy("ui.empty_list_6dcc057")}>
         {emptyState ?? (
@@ -75,6 +91,22 @@ export function VirtualizedList<T>({
     );
   }
 
+  if (!shouldVirtualize) {
+    return (
+      <div
+        className={className}
+        role="list"
+        aria-label={translateCopy("ui.virtualized_list_4c3cd62")}
+      >
+        {items.map((item, index) => (
+          <div key={keyExtractor(item, index)} role="listitem" data-index={index}>
+            {renderItem(item, index)}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
   return (
     <div
       ref={parentRef}
@@ -82,7 +114,11 @@ export function VirtualizedList<T>({
       style={{ height: totalHeight }}
       role="list"
       aria-label={translateCopy("ui.virtualized_list_4c3cd62")}
+      // aria-rowcount tells assistive technology the true total row count even
+      // though only a subset of rows is currently rendered in the DOM.
+      aria-rowcount={items.length}
       tabIndex={0}
+      onKeyDown={handleKeyDown}
     >
       <div
         style={{
@@ -100,6 +136,10 @@ export function VirtualizedList<T>({
               data-index={virtualRow.index}
               ref={virtualizer.measureElement}
               data-virtual-row=""
+              // aria-posinset: 1-indexed position of this item within the full list.
+              aria-posinset={virtualRow.index + 1}
+              // aria-setsize: total number of items in the list.
+              aria-setsize={items.length}
               style={{
                 position: "absolute",
                 top: 0,

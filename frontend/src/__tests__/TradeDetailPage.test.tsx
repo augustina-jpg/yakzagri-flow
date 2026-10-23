@@ -13,6 +13,7 @@ import { useWallet } from "@/hooks/useWallet";
 import { useAuth } from "@/hooks/useAuth";
 import { api } from "@/lib/api";
 import { signTransaction } from "@stellar/freighter-api";
+import { pollTransaction } from "@/lib/stellar";
 
 // ── Mocks ─────────────────────────────────────────────────────────────────────
 
@@ -53,10 +54,15 @@ jest.mock("@stellar/freighter-api", () => ({
   signTransaction: jest.fn(),
 }));
 
+jest.mock("@/lib/stellar", () => ({
+  pollTransaction: jest.fn(),
+}));
+
 const mockUseTradeDetail = useTradeDetail as jest.MockedFunction<typeof useTradeDetail>;
 const mockUseWallet = useWallet as jest.MockedFunction<typeof useWallet>;
 const mockUseAuth = useAuth as jest.MockedFunction<typeof useAuth>;
 const mockSignTransaction = signTransaction as jest.MockedFunction<typeof signTransaction>;
+const mockPollTransaction = pollTransaction as jest.MockedFunction<typeof pollTransaction>;
 const mockDeposit = api.trades.deposit as jest.MockedFunction<typeof api.trades.deposit>;
 const mockConfirmDelivery = api.trades.confirmDelivery as jest.MockedFunction<typeof api.trades.confirmDelivery>;
 const mockReleaseFunds = api.trades.releaseFunds as jest.MockedFunction<typeof api.trades.releaseFunds>;
@@ -114,6 +120,11 @@ beforeEach(() => {
   global.fetch = jest.fn().mockResolvedValue({
     ok: true,
     json: async () => ({ result: { hash: "tx-mock-hash-456" } }),
+  });
+  mockPollTransaction.mockResolvedValue({
+    status: "SUCCESS",
+    hash: "tx-mock-hash-456",
+    ledger: 123456,
   });
 });
 
@@ -284,6 +295,99 @@ describe("Trade Detail — role-based action buttons", () => {
     });
     render(<TradeDetailPage />);
     expect(screen.getByText(/no further actions are available/i)).toBeInTheDocument();
+  });
+});
+
+// ── Next Required Action callout ──────────────────────────────────────────────
+
+describe("Trade Detail — Next Required Action callout", () => {
+  it("shows an action-required deposit message for the buyer in PENDING", () => {
+    mockAuth(BUYER_ADDRESS);
+    mockUseTradeDetail.mockReturnValue({
+      trade: makeTrade("PENDING"),
+      loading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    render(<TradeDetailPage />);
+    const callout = screen.getByTestId("next-action-callout");
+    expect(callout).toBeInTheDocument();
+    expect(callout).toHaveTextContent(/action required/i);
+    expect(callout).toHaveTextContent(/deposit/i);
+  });
+
+  it("shows a waiting-for-buyer message for the seller in PENDING", () => {
+    mockAuth(SELLER_ADDRESS);
+    mockUseTradeDetail.mockReturnValue({
+      trade: makeTrade("PENDING"),
+      loading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    render(<TradeDetailPage />);
+    const callout = screen.getByTestId("next-action-callout");
+    expect(callout).toBeInTheDocument();
+    expect(callout).toHaveTextContent(/waiting for buyer/i);
+  });
+
+  it("shows an action-required release message for the seller in FUNDED", () => {
+    mockAuth(SELLER_ADDRESS);
+    mockUseTradeDetail.mockReturnValue({
+      trade: makeTrade("FUNDED"),
+      loading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    render(<TradeDetailPage />);
+    const callout = screen.getByTestId("next-action-callout");
+    expect(callout).toBeInTheDocument();
+    expect(callout).toHaveTextContent(/action required/i);
+    expect(callout).toHaveTextContent(/release/i);
+  });
+
+  it("shows an action-required confirm-delivery message for the buyer in FUNDED", () => {
+    mockAuth(BUYER_ADDRESS);
+    mockUseTradeDetail.mockReturnValue({
+      trade: makeTrade("FUNDED"),
+      loading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    render(<TradeDetailPage />);
+    const callout = screen.getByTestId("next-action-callout");
+    expect(callout).toBeInTheDocument();
+    expect(callout).toHaveTextContent(/action required/i);
+    expect(callout).toHaveTextContent(/confirm delivery/i);
+  });
+
+  it("shows an action-required mediation message for a mediator in DISPUTED", () => {
+    mockAuth("GMEDIATOR00000000000000000000000000000000000000000000000");
+    mockUseTradeDetail.mockReturnValue({
+      trade: makeTrade("DISPUTED"),
+      loading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    render(<TradeDetailPage />);
+    const callout = screen.getByTestId("next-action-callout");
+    expect(callout).toBeInTheDocument();
+    expect(callout).toHaveTextContent(/action required/i);
+    expect(callout).toHaveTextContent(/mediat/i);
+  });
+
+  it("shows a neutral waiting message for an observer", () => {
+    mockAuth("GOBSERVER000000000000000000000000000000000000000000000000");
+    mockUseTradeDetail.mockReturnValue({
+      trade: makeTrade("FUNDED"),
+      loading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    render(<TradeDetailPage />);
+    const callout = screen.getByTestId("next-action-callout");
+    expect(callout).toBeInTheDocument();
+    expect(callout).toHaveTextContent(/waiting/i);
+    expect(callout).not.toHaveTextContent(/action required/i);
   });
 });
 
@@ -528,6 +632,87 @@ describe("Trade Detail — Freighter signing flow", () => {
         }),
       })
     ));
+  });
+
+  it("polls the transaction after submission and shows ledger confirmation on SUCCESS", async () => {
+    mockAuth(BUYER_ADDRESS);
+    mockUseTradeDetail.mockReturnValue({
+      trade: makeTrade("PENDING"),
+      loading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    mockDeposit.mockResolvedValue({ unsignedXdr: "xdr-payload" });
+    mockPollTransaction.mockResolvedValue({
+      status: "SUCCESS",
+      hash: "tx-mock-hash-456",
+      ledger: 987654,
+    });
+
+    render(<TradeDetailPage />);
+    await userEvent.click(screen.getByTestId("action-deposit"));
+
+    await waitFor(() =>
+      expect(mockPollTransaction).toHaveBeenCalledWith(
+        "tx-mock-hash-456",
+        expect.objectContaining({ timeoutMs: expect.any(Number) }),
+      )
+    );
+    await waitFor(() =>
+      expect(screen.getByText(/confirmed in ledger #987654/i)).toBeInTheDocument()
+    );
+    const hashLink = screen.getByRole("link", { name: /tx-mock-hash-456/i });
+    expect(hashLink).toHaveAttribute(
+      "href",
+      expect.stringContaining("tx-mock-hash-456"),
+    );
+  });
+
+  it("surfaces decoded on-chain failure details when polling returns FAILED", async () => {
+    mockAuth(BUYER_ADDRESS);
+    mockUseTradeDetail.mockReturnValue({
+      trade: makeTrade("PENDING"),
+      loading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    mockDeposit.mockResolvedValue({ unsignedXdr: "xdr-payload" });
+    mockPollTransaction.mockResolvedValue({
+      status: "FAILED",
+      hash: "tx-mock-hash-456",
+      error: "HostError: Error(Contract, #4) — trade already funded",
+    });
+
+    render(<TradeDetailPage />);
+    await userEvent.click(screen.getByTestId("action-deposit"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/trade already funded/i)).toBeInTheDocument()
+    );
+    expect(screen.queryByText(/completed successfully/i)).not.toBeInTheDocument();
+  });
+
+  it("surfaces a timeout message when polling does not confirm in time", async () => {
+    mockAuth(BUYER_ADDRESS);
+    mockUseTradeDetail.mockReturnValue({
+      trade: makeTrade("PENDING"),
+      loading: false,
+      error: null,
+      refetch: jest.fn(),
+    });
+    mockDeposit.mockResolvedValue({ unsignedXdr: "xdr-payload" });
+    mockPollTransaction.mockResolvedValue({
+      status: "TIMEOUT",
+      hash: "tx-mock-hash-456",
+      error: "Timed out waiting for transaction confirmation",
+    });
+
+    render(<TradeDetailPage />);
+    await userEvent.click(screen.getByTestId("action-deposit"));
+
+    await waitFor(() =>
+      expect(screen.getByText(/timed out waiting for transaction confirmation/i)).toBeInTheDocument()
+    );
   });
 
   it("reuses stable Idempotency-Key on retry after failed attempt (#9)", async () => {

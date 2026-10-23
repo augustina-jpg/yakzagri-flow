@@ -31,8 +31,55 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
+    },
+    {
+      "src": "/icons/apple-touch-icon.png",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
     }
   ],
   "categories": ["finance", "agriculture", "business"],
-  "lang": "en"
+  "lang": "en",
+  "shortcuts": [
+    {
+      "name": "Create Trade",
+      "short_name": "Create Trade",
+      "description": "Start a new escrow-backed trade",
+      "url": "/trades/create",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "My Trades",
+      "short_name": "My Trades",
+      "description": "View your active and completed trades",
+      "url": "/trades",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Disputes",
+      "short_name": "Disputes",
+      "description": "Review and resolve trade disputes",
+      "url": "/mediator/disputes",
+      "icons": [
+        {
+          "src": "/icons/icon-192x192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    }
+  ]
 }

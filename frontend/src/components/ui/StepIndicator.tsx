@@ -31,6 +31,7 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({
       {steps.map((step, index) => {
         const isCompleted = completedSteps.includes(index) || index < currentStep;
         const isCurrent = index === currentStep;
+        const statusText = isCompleted ? "completed" : isCurrent ? "current step" : "upcoming";
         
         // Final circle style
         let circleClass = "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-base transition-all duration-200 z-10 ";
@@ -52,12 +53,16 @@ export const StepIndicator: React.FC<StepIndicatorProps> = ({
             key={index} 
             className={`flex items-center ${index < steps.length - 1 ? "flex-1" : ""}`}
             aria-current={isCurrent ? "step" : undefined}
+            aria-label={`Step ${index + 1} of ${steps.length}: ${step.label} (${statusText})`}
           >
             {/* Step circle and Label */}
             <div className="flex flex-col items-center relative gap-2">
               <div className={circleClass} title={step.label}>
                 {content}
               </div>
+              <span className="sr-only">
+                {`Step ${index + 1}: ${step.label} — ${statusText}`}
+              </span>
               
               {/* Label below the circle */}
               <div className="absolute top-12 flex flex-col items-center w-max min-w-15 max-w-30">

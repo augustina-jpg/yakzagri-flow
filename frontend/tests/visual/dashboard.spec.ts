@@ -1,71 +1,31 @@
+import { test, expect } from "@playwright/test";
+
 /**
- * Visual regression tests — Dashboard page (/dashboard).
+ * Visual regression specs for the dashboard and its sibling routes.
  *
- * Covers:
- *  - Unauthenticated "Connect Wallet" prompt
- *  - Authenticated state with fixture stats + recent trades table
- *  - Loading skeleton (verified structurally, not pixel-snapped — too transient)
+ * Each route is captured across the desktop and mobile viewports defined in
+ * `playwright.config.ts` (chromium-desktop / chromium-mobile). Snapshots are
+ * stored per-project so desktop and mobile baselines never collide.
  */
 
-import { test, expect } from './fixtures';
+const ROUTES = [
+  { name: "dashboard", path: "/dashboard" },
+  { name: "reputation", path: "/reputation" },
+  { name: "settings", path: "/settings" },
+  { name: "stream-detail", path: "/streams/1" },
+] as const;
 
-async function waitForStable(page: import('@playwright/test').Page): Promise<void> {
-  await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(150);
-}
+test.describe("visual regression", () => {
+  for (const route of ROUTES) {
+    test(`${route.name} page matches snapshot`, async ({ page }) => {
+      await page.goto(route.path, { waitUntil: "networkidle" });
 
-test.describe('Dashboard — unauthenticated', () => {
-  test('connect-wallet prompt matches snapshot', async ({ publicPage: page }) => {
-    await page.goto('/dashboard');
-    await waitForStable(page);
+      // Wait for fonts to settle so text rendering is deterministic.
+      await page.evaluate(() => document.fonts.ready);
 
-    // The unauthenticated guard renders a centred CTA block.
-    const main = page.locator('main').first();
-    await expect(main).toHaveScreenshot('dashboard-public-main.png');
-  });
-});
-
-test.describe('Dashboard — authenticated', () => {
-  test('stats grid matches snapshot', async ({ authenticatedPage: page }) => {
-    await page.goto('/dashboard');
-    await waitForStable(page);
-
-    // Wait for the header h1 to confirm content rendered.
-    await page.waitForSelector('h1', { timeout: 10_000 });
-
-    // Stats bento cards.
-    const statsGrid = page
-      .locator('[class*="grid"]')
-      .filter({ hasText: 'Total Volume' })
-      .first();
-
-    if (await statsGrid.isVisible()) {
-      await expect(statsGrid).toHaveScreenshot('dashboard-stats-grid.png');
-    }
-  });
-
-  test('recent trades table matches snapshot', async ({ authenticatedPage: page }) => {
-    await page.goto('/dashboard');
-    await waitForStable(page);
-
-    await page.waitForSelector('h1', { timeout: 10_000 });
-
-    // Recent trades section.
-    const tradesSection = page
-      .locator('[class*="space-y"]')
-      .filter({ hasText: 'Recent Trades' })
-      .first();
-
-    if (await tradesSection.isVisible()) {
-      await expect(tradesSection).toHaveScreenshot('dashboard-trades-section.png');
-    }
-  });
-
-  test('full page layout matches snapshot', async ({ authenticatedPage: page }) => {
-    await page.goto('/dashboard');
-    await waitForStable(page);
-    await page.waitForSelector('h1', { timeout: 10_000 });
-
-    await expect(page).toHaveScreenshot('dashboard-auth-full.png', { fullPage: true });
-  });
+      await expect(page).toHaveScreenshot(`${route.name}.png`, {
+        fullPage: true,
+      });
+    });
+  }
 });

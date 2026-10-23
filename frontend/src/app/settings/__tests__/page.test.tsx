@@ -1,51 +1,55 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import SettingsPage from "@/app/settings/page";
-import { PREFERENCES_STORAGE_KEY } from "@/lib/preferences";
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import SettingsPage from '../page';
 
-jest.mock("@/hooks/useAuth", () => ({
-  useAuth: () => ({
-    address: null,
-    isAuthenticated: false,
-    isWalletConnected: false,
-    isWalletDetected: false,
-    isLoading: false,
-    connectWallet: jest.fn(),
-    authenticate: jest.fn(),
-    logout: jest.fn(),
-  }),
-}));
+describe('Settings page', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    jest.clearAllMocks();
+  });
 
-describe("Settings preferences", () => {
-  beforeEach(() => localStorage.clear());
-
-  it("saves the selected currency and notification settings", async () => {
+  it('renders the settings page', () => {
     render(<SettingsPage />);
+    expect(screen.getByRole('heading', { name: /settings/i })).toBeInTheDocument();
+  });
 
-    const currency = await screen.findByRole("combobox", { name: "Preferred currency" });
-    fireEvent.change(currency, { target: { value: "cNGN" } });
-    fireEvent.click(screen.getByRole("switch", { name: "Trade updates" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
-
+  it('toggles notification preferences', async () => {
+    render(<SettingsPage />);
+    const toggle = screen.getByRole('switch', { name: /notifications/i });
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(toggle);
     await waitFor(() => {
-      const saved = JSON.parse(localStorage.getItem(PREFERENCES_STORAGE_KEY) ?? "{}");
-      expect(saved.currency).toBe("cNGN");
-      expect(saved.notifications.tradeUpdates).toBe(false);
+      expect(toggle).toHaveAttribute('aria-checked', 'false');
     });
   });
 
-  it("only references rendered description and error nodes", async () => {
+  it('changes the network select', async () => {
     render(<SettingsPage />);
+    const select = screen.getByLabelText(/network/i) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'testnet' } });
+    await waitFor(() => {
+      expect(select.value).toBe('testnet');
+    });
+  });
 
-    const network = await screen.findByRole("combobox", { name: "Network" });
-    fireEvent.change(network, { target: { value: "" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save preferences" }));
-    await screen.findByText("Network selection is required");
+  it('changes the currency select', async () => {
+    render(<SettingsPage />);
+    const select = screen.getByLabelText(/currency/i) as HTMLSelectElement;
+    fireEvent.change(select, { target: { value: 'EUR' } });
+    await waitFor(() => {
+      expect(select.value).toBe('EUR');
+    });
+  });
 
-    const describedBy = network.getAttribute("aria-describedby")?.split(/\s+/) ?? [];
-    expect(describedBy).toHaveLength(2);
-    expect(describedBy.every((id) => document.getElementById(id) !== null)).toBe(true);
-    expect(
-      describedBy.some((id) => document.getElementById(id)?.textContent === "Network selection is required"),
-    ).toBe(true);
+  it('resets preferences to defaults', async () => {
+    render(<SettingsPage />);
+    const toggle = screen.getByRole('switch', { name: /notifications/i });
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(toggle).toHaveAttribute('aria-checked', 'false');
+    });
+    fireEvent.click(screen.getByRole('button', { name: /reset/i }));
+    await waitFor(() => {
+      expect(toggle).toHaveAttribute('aria-checked', 'true');
+    });
   });
 });

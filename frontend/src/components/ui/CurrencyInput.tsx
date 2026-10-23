@@ -2,6 +2,7 @@
 import { t as translateCopy } from "@/lib/i18n";
 import { type InputHTMLAttributes } from "react";
 import type { AssetInfo } from "@/lib/stellar/assets";
+import { sanitizeCurrencyInput } from "@/hooks/useCurrencyInput";
 
 interface CurrencyInputProps
   extends Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "onChange"> {
@@ -50,7 +51,7 @@ export function CurrencyInput({
           value={value}
           onChange={(e) => {
             if (disabled) return;
-            onChange(e.target.value);
+            onChange(sanitizeCurrencyInput(e.target.value, asset.decimals));
           }}
           disabled={disabled}
           placeholder={placeholder || `0.${"0".repeat(Math.min(asset.decimals, 2))}`}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { CheckCircle, AlertTriangle, XCircle, Info, X } from "lucide-react";
 import { ToastMessage } from "@/types/toast";
 import { clsx } from "clsx";
@@ -19,8 +19,16 @@ export function Toast({
   onClose,
 }: ToastProps) {
   const [isClosing, setIsClosing] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  // Milliseconds left before auto-dismiss, preserved across pause/resume.
+  const remainingRef = useRef(duration);
 
   const handleClose = useCallback(() => {
+    if (isClosingRef.current) return;
+    isClosingRef.current = true;
+    if (timeoutRef.current) clearTimeout(timeoutRef.current);
+    timeoutRef.current = null;
+    timerStartedAtRef.current = null;
     setIsClosing(true);
     // Wait for the slide-out/fade-out animation to finish before actually removing it
     setTimeout(() => {
@@ -28,14 +36,25 @@ export function Toast({
     }, 300); // 300ms matches our transition duration
   }, [id, onClose]);
 
+  // Reset the countdown whenever the duration prop changes.
   useEffect(() => {
-    if (duration > 0) {
-      const timer = setTimeout(() => {
-        handleClose();
-      }, duration);
-      return () => clearTimeout(timer);
-    }
-  }, [duration, handleClose]);
+    remainingRef.current = duration;
+  }, [duration]);
+
+  // Auto-dismiss countdown. Pauses while the toast is hovered or holds focus
+  // (WCAG 2.2.1 Timing Adjustable) and resumes with the remaining time on leave.
+  useEffect(() => {
+    if (duration <= 0 || isPaused) return;
+    const startedAt = Date.now();
+    const timer = setTimeout(() => {
+      remainingRef.current = 0;
+      handleClose();
+    }, remainingRef.current);
+    return () => {
+      clearTimeout(timer);
+      remainingRef.current = Math.max(0, remainingRef.current - (Date.now() - startedAt));
+    };
+  }, [duration, isPaused, handleClose]);
 
   const IconMap = {
     success: CheckCircle,
@@ -48,7 +67,7 @@ export function Toast({
 
   // Base styling for the toast
   const baseClasses =
-    "pointer-events-auto flex w-full max-w-md rounded-lg shadow-card ring-1 ring-black/5 p-4 transition-all duration-300 transform items-start gap-3 relative overflow-hidden backdrop-blur-md";
+    "pointer-events-auto flex w-full max-w-md rounded-lg shadow-elev-1 ring-1 ring-black/5 p-4 transition-all duration-300 transform items-start gap-3 relative overflow-hidden backdrop-blur-md";
 
   // Animation classes
   const animationClasses = isClosing
@@ -76,6 +95,24 @@ export function Toast({
 
   return (
     <div
+      onMouseEnter={() => {
+        isHoveredRef.current = true;
+        pauseTimer();
+      }}
+      onMouseLeave={() => {
+        isHoveredRef.current = false;
+        if (!isFocusedRef.current) resumeTimer();
+      }}
+      onFocusCapture={() => {
+        isFocusedRef.current = true;
+        pauseTimer();
+      }}
+      onBlurCapture={(event) => {
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+        isFocusedRef.current = false;
+        if (!isHoveredRef.current) resumeTimer();
+      }}
       className={clsx(
         baseClasses,
         animationClasses,
@@ -83,6 +120,10 @@ export function Toast({
       )}
       role="group"
       aria-labelledby={title ? titleId : undefined}
+      onMouseEnter={() => setIsPaused(true)}
+      onMouseLeave={() => setIsPaused(false)}
+      onFocus={() => setIsPaused(true)}
+      onBlur={() => setIsPaused(false)}
     >
       <Icon className={clsx("h-6 w-6 shrink-0", iconColors[type])} />
       <div className="flex-1 pt-0.5">
@@ -108,6 +149,7 @@ export function Toast({
           className="toast-progress absolute bottom-0 left-0 h-1 w-full bg-current opacity-20"
           style={{
             animationDuration: `${duration}ms`,
+            animationPlayState: isPaused ? "paused" : "running",
           }}
         />
       )}
