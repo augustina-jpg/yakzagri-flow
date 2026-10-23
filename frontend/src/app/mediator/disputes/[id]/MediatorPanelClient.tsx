@@ -89,7 +89,7 @@ function getStoredToken(): string | null {
   return sessionStorage.getItem(TOKEN_STORAGE_KEY);
 }
 
-function isProbablyIpfsCid(value: string): boolean {
+export function isProbablyIpfsCid(value: string): boolean {
   const trimmedValue = value.trim();
   if (!trimmedValue) {
     return false;
@@ -102,7 +102,7 @@ function isProbablyIpfsCid(value: string): boolean {
   return /^bafy[2-7a-z]{20,}$/i.test(trimmedValue);
 }
 
-function pickBestEvidenceCid(records: EvidenceRecord[]): string | null {
+export function pickBestEvidenceCid(records: EvidenceRecord[]): string | null {
   if (records.length === 0) {
     return null;
   }
@@ -147,6 +147,7 @@ export default function MediatorPanelClient({ disputeId }: Props) {
   const submittingRef = useRef(false);
 
   const [execString, setExecString] = useState<string>("");
+  const [resolutionError, setResolutionError] = useState<string | null>(null);
 
   const mediatorAddresses = useMemo(() => {
     const fromEnv = (process.env.NEXT_PUBLIC_MEDIATOR_WALLETS ?? "")
@@ -158,6 +159,7 @@ export default function MediatorPanelClient({ disputeId }: Props) {
   }, []);
 
   const isMediator = Boolean(address && mediatorAddresses.includes(address));
+  const canResolve = isMediator && !isSubmittingTx;
   const explorerNetwork =
     process.env.NEXT_PUBLIC_STELLAR_NETWORK === "public" ? "public" : "testnet";
 
@@ -331,8 +333,16 @@ export default function MediatorPanelClient({ disputeId }: Props) {
     setModal({ isOpen: false, sellerGetsBps: null, splitLabel: "" });
   }
 
-  function getBuyerSplit(sellerBps: number): number {
-    return 10000 - sellerBps;
+  function handleConfirmResolution() {
+    const bps = modal.sellerGetsBps;
+    if (bps === null) return;
+    closeModal();
+    void executeResolution(bps);
+  }
+
+  function handleOpenConfirmation(sellerGetsBps: number, splitLabel: string) {
+    setResolutionError(null);
+    openConfirmationModal(sellerGetsBps, splitLabel);
   }
 
   async function executeResolution(sellerGetsBps: number) {
@@ -345,6 +355,7 @@ export default function MediatorPanelClient({ disputeId }: Props) {
     submittingRef.current = true;
     const parsedTradeId = Number(disputeId);
     if (!Number.isInteger(parsedTradeId) || parsedTradeId < 0) {
+      submittingRef.current = false;
       setTxStatus("Dispute ID must be a numeric on-chain trade_id.");
       return;
     }
@@ -353,11 +364,13 @@ export default function MediatorPanelClient({ disputeId }: Props) {
     const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL?.trim();
 
     if (!contractId || !rpcUrl) {
+      submittingRef.current = false;
       setTxStatus("Missing NEXT_PUBLIC_CONTRACT_ID or NEXT_PUBLIC_RPC_URL.");
       return;
     }
 
     setIsSubmittingTx(true);
+    setResolutionError(null);
     setTxStatus("Preparing Soroban transaction...");
 
     try {
@@ -413,9 +426,10 @@ export default function MediatorPanelClient({ disputeId }: Props) {
 
       setTxStatus(`Submitted. Hash: ${sendResponse.hash}`);
     } catch (error) {
-      setTxStatus(
-        error instanceof Error ? error.message : "Soroban execution failed",
-      );
+      const message =
+        error instanceof Error ? error.message : "Soroban execution failed";
+      setResolutionError(message);
+      setTxStatus(message);
     } finally {
       submittingRef.current = false;
       setIsSubmittingTx(false);
@@ -702,7 +716,11 @@ export default function MediatorPanelClient({ disputeId }: Props) {
 
             {/* Tx status feedback */}
             {txStatus && (
-              <p className="text-xs text-text-secondary break-all">
+              <p
+                data-testid="tx-status"
+                role={resolutionError ? "alert" : "status"}
+                className="text-xs text-text-secondary break-all"
+              >
                 {txStatus}
               </p>
             )}
@@ -787,7 +805,10 @@ export default function MediatorPanelClient({ disputeId }: Props) {
                     <span className="text-sm font-medium text-text-secondary">
                       {translateCopy("ui.split_208adf5")}
                     </span>
-                    <span className="text-sm font-semibold text-text-primary">
+                    <span
+                      data-testid="split-label"
+                      className="text-sm font-semibold text-text-primary"
+                    >
                       {modal.splitLabel}
                     </span>
                   </div>
@@ -796,7 +817,10 @@ export default function MediatorPanelClient({ disputeId }: Props) {
                     <span className="text-sm font-medium text-text-secondary">
                       {translateCopy("ui.seller_receives_f80dbbe")}
                     </span>
-                    <span className="text-sm font-semibold text-status-success">
+                    <span
+                      data-testid="seller-receives"
+                      className="text-sm font-semibold text-status-success"
+                    >
                       {(modal.sellerGetsBps / 100).toFixed(2)}%
                     </span>
                   </div>
@@ -804,7 +828,10 @@ export default function MediatorPanelClient({ disputeId }: Props) {
                     <span className="text-sm font-medium text-text-secondary">
                       {translateCopy("ui.buyer_receives_6af6881")}
                     </span>
-                    <span className="text-sm font-semibold text-gold">
+                    <span
+                      data-testid="buyer-receives"
+                      className="text-sm font-semibold text-gold"
+                    >
                       {(getBuyerSplit(modal.sellerGetsBps) / 100).toFixed(2)}%
                     </span>
                   </div>
@@ -864,6 +891,7 @@ export default function MediatorPanelClient({ disputeId }: Props) {
                 <button
                   onClick={closeModal}
                   disabled={isSubmittingTx}
+                  data-testid="cancel-resolution"
                   className="px-3 sm:px-4 py-2.5 border border-border-default text-text-primary text-sm font-medium rounded-md hover:bg-bg-elevated disabled:opacity-50 transition"
                   aria-label={translateCopy("ui.cancel_resolution_4acad72")}
                 >

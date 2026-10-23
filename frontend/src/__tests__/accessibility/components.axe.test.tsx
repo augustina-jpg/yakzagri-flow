@@ -1,5 +1,6 @@
 import React from "react";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { axe, toHaveNoViolations } from "jest-axe";
 import { Button } from "@/components/ui/Button";
 import { FormField } from "@/components/ui/FormField";
@@ -12,6 +13,57 @@ import { TradeListItem } from "@/components/trade/TradeListItem";
 expect.extend(toHaveNoViolations);
 
 describe("Accessibility audit — WCAG 2.1 AA", () => {
+  describe("Skip to main content link", () => {
+    const renderLayout = () =>
+      render(
+        <div>
+          <a href="#main-content" className="skip-link">
+            Skip to main content
+          </a>
+          <nav aria-label="Main navigation">
+            <a href="/dashboard">Dashboard</a>
+            <a href="/trades">Trades</a>
+          </nav>
+          <main id="main-content" tabIndex={-1}>
+            <h1>Dashboard</h1>
+          </main>
+        </div>
+      );
+
+    it("is the first focusable element in the layout", async () => {
+      const user = userEvent.setup();
+      renderLayout();
+
+      await user.tab();
+
+      const skipLink = screen.getByRole("link", { name: "Skip to main content" });
+      expect(skipLink).toHaveFocus();
+    });
+
+    it("targets the main content landmark", () => {
+      renderLayout();
+
+      const skipLink = screen.getByRole("link", { name: "Skip to main content" });
+      expect(skipLink).toHaveAttribute("href", "#main-content");
+      expect(screen.getByRole("main")).toHaveAttribute("id", "main-content");
+    });
+
+    it("moves focus to the main content landmark when activated", async () => {
+      const user = userEvent.setup();
+      renderLayout();
+
+      await user.tab();
+      await user.keyboard("{Enter}");
+
+      expect(screen.getByRole("main")).toHaveFocus();
+    });
+
+    it("has no axe violations", async () => {
+      const { container } = renderLayout();
+      expect(await axe(container)).toHaveNoViolations();
+    });
+  });
+
   describe("RepScoreRing", () => {
     it("shows a text label and announces the score with sufficient contrast tokens", async () => {
       const { container } = render(<RepScoreRing score={4.5} />);
