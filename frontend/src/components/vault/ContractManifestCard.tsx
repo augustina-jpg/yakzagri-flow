@@ -1,9 +1,33 @@
 
+import { useCallback, useEffect, useRef, useState } from "react";
 import { t as translateCopy } from "@/lib/i18n";
 import { BentoCard } from "@/components/ui/BentoCard";
-import { FileText, Eye } from "lucide-react";
+import { FileText, Eye, Copy, Check, ExternalLink, ShieldCheck, ShieldAlert } from "lucide-react";
 import Image from 'next/image';
 import Download from "@/app/assets/ExportIcon.png"
+
+const STELLAR_NETWORKS = {
+  testnet: {
+    label: "Testnet",
+    passphrase: "Test SDF Network ; September 2015",
+    explorerBaseUrl: "https://stellar.expert/explorer/testnet/contract",
+  },
+  mainnet: {
+    label: "Mainnet",
+    passphrase: "Public Global Stellar Network ; September 2015",
+    explorerBaseUrl: "https://stellar.expert/explorer/public/contract",
+  },
+} as const;
+
+type StellarNetwork = keyof typeof STELLAR_NETWORKS;
+
+function resolveStellarNetwork(): StellarNetwork {
+  const configured =
+    typeof process !== "undefined"
+      ? process.env?.NEXT_PUBLIC_STELLAR_NETWORK
+      : undefined;
+  return configured?.toLowerCase() === "mainnet" ? "mainnet" : "testnet";
+}
 
 interface Party {
   initials: string;
@@ -19,6 +43,12 @@ interface ContractManifestCardProps {
   recipientParty: Party;
   onExportPdf?: () => void;
   onViewClauses?: () => void;
+  /** Expected on-chain WASM hash for the deployed Soroban contract. */
+  wasmHash?: string;
+  /** Hash reported by the network for the deployed contract, if known. */
+  deployedWasmHash?: string;
+  /** Override the network derived from configuration (useful for tests). */
+  network?: StellarNetwork;
 }
 
 export function ContractManifestCard({
@@ -29,10 +59,51 @@ export function ContractManifestCard({
   recipientParty,
   onExportPdf,
   onViewClauses,
+  wasmHash,
+  deployedWasmHash,
+  network,
 }: ContractManifestCardProps) {
   const getPartyBgColor = (color: Party["color"]) => {
     return color === "teal" ? "bg-teal" : "bg-emerald";
   };
+
+  const activeNetwork = network ?? resolveStellarNetwork();
+  const networkConfig = STELLAR_NETWORKS[activeNetwork];
+
+  const [copied, setCopied] = useState(false);
+  const copyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopyContractId = useCallback(async () => {
+    try {
+      if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(contractId);
+      }
+      setCopied(true);
+      if (copyTimeoutRef.current) {
+        clearTimeout(copyTimeoutRef.current);
+      }
+      copyTimeoutRef.current = setTimeout(() => setCopied(false), 2000);
+    } catch {
+      setCopied(false);
+    }
+  }, [contractId]);
+
+  const explorerUrl = `${networkConfig.explorerBaseUrl}/${contractId}`;
+
+  const wasmStatus: "verified" | "mismatch" | "unverified" =
+    wasmHash && deployedWasmHash
+      ? wasmHash.toLowerCase() === deployedWasmHash.toLowerCase()
+        ? "verified"
+        : "mismatch"
+      : "unverified";
 
   return (
     <BentoCard
@@ -41,9 +112,78 @@ export function ContractManifestCard({
       glowVariant="gold"
       className="h-104"
     >
-      <div className="flex items-center justify-end -mt-8 mb-6">
-        <span className="text-xs font-mono text-gold bg-gold-muted px-3 py-1 rounded-full">
-          {contractId}
+      <div className="flex flex-col gap-2 -mt-8 mb-6">
+        <div className="flex items-center justify-end gap-2">
+          <span
+            className="text-xs font-semibold text-text-primary bg-bg-input px-3 py-1 rounded-full"
+            title={networkConfig.passphrase}
+          >
+            {networkConfig.label}
+          </span>
+          <span
+            className={`text-xs font-semibold px-3 py-1 rounded-full flex items-center gap-1 ${
+              wasmStatus === "verified"
+                ? "text-emerald bg-emerald-muted"
+                : wasmStatus === "mismatch"
+                  ? "text-red bg-red-muted"
+                  : "text-text-secondary bg-bg-input"
+            }`}
+            role="status"
+            aria-live="polite"
+          >
+            {wasmStatus === "verified" ? (
+              <ShieldCheck className="w-3.5 h-3.5" aria-hidden="true" />
+            ) : (
+              <ShieldAlert className="w-3.5 h-3.5" aria-hidden="true" />
+            )}
+            {wasmStatus === "verified"
+              ? translateCopy("ui.wasm_verified")
+              : wasmStatus === "mismatch"
+                ? translateCopy("ui.wasm_mismatch")
+                : translateCopy("ui.wasm_unverified")}
+          </span>
+        </div>
+        <div className="flex items-center justify-end gap-2">
+          <span
+            className="text-xs font-mono text-gold bg-gold-muted px-3 py-1 rounded-full break-all"
+            title={contractId}
+          >
+            {contractId}
+          </span>
+          <button
+            type="button"
+            onClick={handleCopyContractId}
+            aria-label={
+              copied
+                ? translateCopy("ui.contract_id_copied")
+                : translateCopy("ui.copy_contract_id")
+            }
+            title={
+              copied
+                ? translateCopy("ui.contract_id_copied")
+                : translateCopy("ui.copy_contract_id")
+            }
+            className="flex items-center justify-center w-7 h-7 rounded-full bg-bg-input hover:bg-gold-muted text-text-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+          >
+            {copied ? (
+              <Check className="w-3.5 h-3.5" aria-hidden="true" />
+            ) : (
+              <Copy className="w-3.5 h-3.5" aria-hidden="true" />
+            )}
+          </button>
+          <a
+            href={explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={translateCopy("ui.view_on_explorer")}
+            title={translateCopy("ui.view_on_explorer")}
+            className="flex items-center justify-center w-7 h-7 rounded-full bg-bg-input hover:bg-gold-muted text-text-primary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-gold"
+          >
+            <ExternalLink className="w-3.5 h-3.5" aria-hidden="true" />
+          </a>
+        </div>
+        <span className="sr-only" role="status" aria-live="polite">
+          {copied ? translateCopy("ui.contract_id_copied") : ""}
         </span>
       </div>
 
