@@ -90,6 +90,7 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setSubmitAttempted(true);
     const form = formRef.current;
 
     if (!form) {
@@ -190,6 +191,7 @@ export function DriverManifestForm({ isOpen, onComplete, onDismiss }: DriverMani
                   onChange={(event) => setLicensePlate(event.target.value)}
                   onBlur={() => setTouched((prev) => ({ ...prev, plate: true }))}
                   placeholder={translateCopy("ui.e_g_geg_1123_h_814141c")}
+                  aria-invalid={showPlateError}
                   required
                 />
               </FormField>

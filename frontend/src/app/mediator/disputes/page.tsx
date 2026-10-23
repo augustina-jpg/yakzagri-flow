@@ -12,9 +12,45 @@ import { SkeletonList } from "@/components/ui/SkeletonList";
 import { Tabs } from "@/components/ui/Tabs";
 import { Button } from "@/components/ui/Button";
 import { getStatusBadgeClasses } from "@/components/ui/StatusBadge";
-import { getMediatorAddresses, isMediatorAddress, formatDate, formatAddress } from "./helpers";
+import {
+  getMediatorAddresses,
+  isMediatorAddress,
+  formatDate,
+  formatAddress,
+  getSlaBucket,
+  sortDisputes,
+  type DisputeSortKey,
+} from "./helpers";
 
 type DisputeStatus = "OPEN" | "UNDER_REVIEW" | "RESOLVED" | "CLOSED";
+
+const SORT_OPTIONS: { label: string; value: DisputeSortKey }[] = [
+  { label: "SLA urgency", value: "sla" },
+  { label: "Trade value", value: "value" },
+  { label: "Creation date", value: "created" },
+];
+
+function getSlaBadgeClasses(bucket: "normal" | "warning" | "critical"): string {
+  switch (bucket) {
+    case "critical":
+      return "bg-red-600 text-white animate-pulse";
+    case "warning":
+      return "bg-amber-500 text-white";
+    default:
+      return "bg-green-100 text-green-800";
+  }
+}
+
+function getSlaBadgeLabel(bucket: "normal" | "warning" | "critical"): string {
+  switch (bucket) {
+    case "critical":
+      return "Critical SLA";
+    case "warning":
+      return "Warning SLA";
+    default:
+      return "Normal";
+  }
+}
 
 const FILTERS: { label: string; value: DisputeStatus | "all" }[] = [
   { label: "All Active", value: "all" },
@@ -30,6 +66,7 @@ export default function MediatorDisputesPage() {
   const { token, isAuthenticated } = useAuth();
   const { address } = useFreighterIdentity();
   const [activeFilter, setActiveFilter] = useState<DisputeStatus | "all">("all");
+  const [sortKey, setSortKey] = useState<DisputeSortKey>("sla");
   const [page, setPage] = useState(1);
   const [disputes, setDisputes] = useState<DisputeResponse[]>([]);
   const [totalPages, setTotalPages] = useState(1);
@@ -80,6 +117,16 @@ export default function MediatorDisputesPage() {
     setActiveFilter(value);
     setPage(1);
   }
+
+  function handleSortChange(value: DisputeSortKey) {
+    setSortKey(value);
+    setPage(1);
+  }
+
+  const sortedDisputes = useMemo(
+    () => sortDisputes(disputes, sortKey),
+    [disputes, sortKey]
+  );
 
   if (!isMediator) {
     return (
@@ -139,6 +186,26 @@ export default function MediatorDisputesPage() {
         className="mb-6"
       />
 
+      {/* Sort selector */}
+      <div className="flex items-center gap-2 mb-6">
+        <label htmlFor="dispute-sort" className="text-sm text-text-secondary">
+          {translateCopy("ui.sort_by_9f2c1a4")}
+        </label>
+        <select
+          id="dispute-sort"
+          value={sortKey}
+          onChange={(e) => handleSortChange(e.target.value as DisputeSortKey)}
+          className="px-3 py-1.5 text-sm rounded-md border border-border-default bg-bg-elevated text-text-primary"
+          data-testid="dispute-sort-select"
+        >
+          {SORT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
       {/* Disputes list */}
       <div className="space-y-4">
         {disputes.length === 0 ? (
@@ -146,7 +213,9 @@ export default function MediatorDisputesPage() {
             {translateCopy("ui.no_disputes_found_c7d5c32")}
           </div>
         ) : (
-          disputes.map((dispute) => (
+          sortedDisputes.map((dispute) => {
+            const slaBucket = getSlaBucket(dispute.createdAt);
+            return (
             <Link
               key={dispute.id}
               href={`/mediator/disputes/${dispute.tradeId}`}
@@ -162,6 +231,12 @@ export default function MediatorDisputesPage() {
                       className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusBadgeClasses(dispute.status)}`}
                     >
                       {dispute.status.replace("_", " ")}
+                    </span>
+                    <span
+                      className={`px-2 py-1 rounded-full text-xs font-semibold ${getSlaBadgeClasses(slaBucket)}`}
+                      data-testid={`sla-badge-${slaBucket}`}
+                    >
+                      {getSlaBadgeLabel(slaBucket)}
                     </span>
                   </div>
                   <div className="text-sm text-text-secondary mb-2">
@@ -179,7 +254,8 @@ export default function MediatorDisputesPage() {
                 </div>
               </div>
             </Link>
-          ))
+            );
+          })
         )}
       </div>
 
