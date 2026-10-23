@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useAdmin } from "@/hooks/useAdmin";
 import { api, type StreamRemainingResponse, ApiError } from "@/lib/api";
 import { Breadcrumbs, LoadingState, ErrorState } from "@/components/ui";
+import { StalenessIndicator } from "@/components/ui/StalenessIndicator";
 import {
   getAssetInfo,
   stroopsToAmount,
@@ -22,6 +23,8 @@ export default function StreamDetailPage() {
   const [streamData, setStreamData] = useState<StreamRemainingResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [lastFetched, setLastFetched] = useState<Date | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Get asset info from stream data
   const assetInfo = useMemo(() => {
@@ -31,7 +34,12 @@ export default function StreamDetailPage() {
   const decimals = streamData?.decimals ?? assetInfo.decimals;
 
   useEffect(() => {
-    if (!token || !streamId) return;
+    if (authLoading) return;
+
+    if (!token || !streamId) {
+      setLoading(false);
+      return;
+    }
 
     const fetchStreamData = async () => {
       setLoading(true);
@@ -40,6 +48,7 @@ export default function StreamDetailPage() {
       try {
         const data = await api.streams.getRemaining(token, streamId);
         setStreamData(data);
+        setLastFetched(new Date());
       } catch (err) {
         const message =
           err instanceof ApiError
@@ -54,7 +63,50 @@ export default function StreamDetailPage() {
     };
 
     void fetchStreamData();
-  }, [token, streamId]);
+  }, [token, streamId, authLoading]);
+
+  const handleRefresh = async () => {
+    if (!token || !streamId || refreshing) return;
+
+    setRefreshing(true);
+    setError(null);
+
+    try {
+      const data = await api.streams.getRemaining(token, streamId);
+      setStreamData(data);
+      setLastFetched(new Date());
+    } catch (err) {
+      const message =
+        err instanceof ApiError
+          ? err.message
+          : err instanceof Error
+            ? err.message
+            : "Failed to refresh stream data";
+      setError(message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const totalVested = streamData ? Number(BigInt(streamData.totalVested)) : 0;
+  const claimed = streamData ? Number(BigInt(streamData.claimed)) : 0;
+  const unclaimed = streamData ? Number(BigInt(streamData.unclaimed)) : 0;
+  const claimedPercent = totalVested > 0 ? (claimed / totalVested) * 100 : 0;
+  const remainingPercent = totalVested > 0 ? (unclaimed / totalVested) * 100 : 0;
+
+  const startTime = streamData?.startTime ?? null;
+  const endTime = streamData?.endTime ?? null;
+  const flowRatePerSecond = useMemo(() => {
+    if (!startTime || !endTime || totalVested <= 0) return null;
+    const durationSeconds = endTime - startTime;
+    if (durationSeconds <= 0) return null;
+    return totalVested / durationSeconds;
+  }, [startTime, endTime, totalVested]);
+
+  const formatTimestamp = (value: number | null) => {
+    if (!value) return "—";
+    return new Date(value * 1000).toLocaleString();
+  };
 
   const breadcrumbItems = [
     { label: "Home", path: "/" },
@@ -116,6 +168,17 @@ export default function StreamDetailPage() {
             <p className="mt-0.5 text-xs text-text-secondary">
               {translateCopy("ui.vested_token_stream_information_ac11f29")}{" "}{assetInfo.symbol} ({decimals} {translateCopy("ui.decimals_5e8b1a0")}
             </p>
+          </div>
+          <div className="flex items-center gap-3">
+            {lastFetched && <StalenessIndicator lastUpdated={lastFetched} />}
+            <button
+              type="button"
+              onClick={() => void handleRefresh()}
+              disabled={refreshing}
+              className="rounded-lg border border-border-default bg-card px-3 py-1.5 text-xs font-medium text-text-primary transition-colors hover:bg-bg-elevated disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {refreshing ? "Refreshing…" : "Refresh Balance"}
+            </button>
           </div>
         </div>
 
@@ -202,32 +265,67 @@ export default function StreamDetailPage() {
               <div className="h-3 w-full overflow-hidden rounded-full bg-bg-elevated">
                 <div
                   className="h-full bg-status-success transition-all"
-                  style={{
-                    width: `${
-                      (Number(BigInt(streamData.claimed)) /
-                        Number(BigInt(streamData.totalVested))) *
-                      100
-                    }%`,
-                  }}
+                  style={{ width: `${claimedPercent}%` }}
                 />
               </div>
               <div className="mt-2 flex justify-between text-xs text-text-muted">
                 <span>
-                  {(
-                    (Number(BigInt(streamData.claimed)) /
-                      Number(BigInt(streamData.totalVested))) *
-                    100
-                  ).toFixed(2)}
+                  {claimedPercent.toFixed(2)}
                   {translateCopy("ui.claimed_ea4976c")}
                 </span>
                 <span>
-                  {(
-                    (Number(BigInt(streamData.unclaimed)) /
-                      Number(BigInt(streamData.totalVested))) *
-                    100
-                  ).toFixed(2)}
+                  {remainingPercent.toFixed(2)}
                   {translateCopy("ui.remaining_0ebfc6b")}
                 </span>
+              </div>
+            </div>
+
+            {/* Stream timeline & flow rate */}
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl border border-border-default bg-card p-5">
+                <p className="text-xs uppercase tracking-[0.22em] text-text-secondary">
+                  Start Time
+                </p>
+                <p className="mt-2 text-sm font-medium text-text-primary">
+                  {formatTimestamp(startTime)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-border-default bg-card p-5">
+                <p className="text-xs uppercase tracking-[0.22em] text-text-secondary">
+                  End Time
+                </p>
+                <p className="mt-2 text-sm font-medium text-text-primary">
+                  {formatTimestamp(endTime)}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-border-default bg-card p-5">
+                <p className="text-xs uppercase tracking-[0.22em] text-text-secondary">
+                  Flow Rate / Hour
+                </p>
+                <p className="mt-2 text-sm font-medium text-text-primary">
+                  {flowRatePerSecond !== null
+                    ? `${stroopsToAmount(
+                        Math.round(flowRatePerSecond * 3600),
+                        decimals,
+                      )} ${assetInfo.symbol}`
+                    : "—"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-border-default bg-card p-5">
+                <p className="text-xs uppercase tracking-[0.22em] text-text-secondary">
+                  Flow Rate / Day
+                </p>
+                <p className="mt-2 text-sm font-medium text-text-primary">
+                  {flowRatePerSecond !== null
+                    ? `${stroopsToAmount(
+                        Math.round(flowRatePerSecond * 86400),
+                        decimals,
+                      )} ${assetInfo.symbol}`
+                    : "—"}
+                </p>
               </div>
             </div>
           </div>

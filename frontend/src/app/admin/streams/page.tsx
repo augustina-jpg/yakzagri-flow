@@ -14,9 +14,28 @@ import { SkeletonList } from "@/components/ui/SkeletonList";
 import { Button } from "@/components/ui/Button";
 import { StreamClawbackForm } from "@/components/admin/StreamClawbackForm";
 import { VirtualizedList } from "@/components/ui/VirtualizedList";
+import {
+  computeStreamHealth,
+  formatEstimatedDepletion,
+  type StreamHealthStatus,
+} from "@/lib/api/adminStreams";
 
 const PAGE_SIZE = 20;
-const STREAM_ROW_HEIGHT = 140;
+const STREAM_ROW_HEIGHT = 200;
+
+const HEALTH_BADGE_STYLES: Record<StreamHealthStatus, string> = {
+  streaming: "bg-status-success/10 text-status-success border-status-success/30",
+  near_depletion: "bg-status-warning/10 text-status-warning border-status-warning/30",
+  completed: "bg-bg-subtle text-text-secondary border-border-default",
+  paused: "bg-status-info/10 text-status-info border-status-info/30",
+};
+
+const HEALTH_BADGE_LABELS: Record<StreamHealthStatus, string> = {
+  streaming: "Streaming",
+  near_depletion: "Near Depletion <10%",
+  completed: "Completed",
+  paused: "Paused",
+};
 
 export default function AdminStreamsPage() {
   const { token, isAuthenticated } = useAuth();
@@ -171,6 +190,29 @@ export default function AdminStreamsPage() {
                     ) : (
                       <span className="text-xs text-text-secondary">{translateCopy("ui.no_clawback_available_33fc8e7")}</span>
                     )}
+                  </div>
+                  <div className="mt-3" data-testid={`stream-progress-${stream.streamId}`}>
+                    <div className="flex items-center justify-between text-xs text-text-secondary mb-1">
+                      <span>{health.percentStreamed.toFixed(1)}% streamed</span>
+                      <span>{health.percentRemaining.toFixed(1)}% remaining</span>
+                    </div>
+                    <div
+                      className="h-2 w-full rounded-full bg-bg-subtle overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={Math.round(health.percentStreamed)}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                    >
+                      <div
+                        className={`h-full rounded-full ${
+                          isNearDepletion ? "bg-status-warning" : "bg-status-success"
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(0, health.percentStreamed))}%` }}
+                      />
+                    </div>
+                    <div className="mt-1 text-xs text-text-secondary">
+                      {formatEstimatedDepletion(health.estimatedDepletion)}
+                    </div>
                   </div>
                 </div>
 
